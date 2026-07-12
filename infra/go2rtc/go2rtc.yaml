@@ -5,6 +5,8 @@ api:
   # This port is not published to the host. FastAPI proxies only WHEP signaling.
   allow_paths:
     - /api/webrtc
+    - /api/stream.m3u8
+    - /api/hls
 webrtc:
   listen: ":8555"
   candidates:

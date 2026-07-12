@@ -55,3 +55,26 @@ def test_whep_proxy_uses_internal_bridge_and_returns_only_sdp(monkeypatch) -> No
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/sdp"
     assert calls[0][0] == "http://go2rtc:1984/api/webrtc?src=front-door"
+
+
+def test_hls_diagnostic_rewrites_internal_playlist_paths(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 200
+        content = b"#EXTM3U\nhls/playlist.m3u8?id=abc\n"
+        headers = {"content-type": "application/vnd.apple.mpegurl"}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", lambda **_kwargs: FakeClient())
+    with TestClient(app) as client:
+        response = client.get("/api/v1/diagnostics/hls/stream.m3u8")
+    assert response.status_code == 200
+    assert "/api/v1/diagnostics/hls/playlist.m3u8?id=abc" in response.text

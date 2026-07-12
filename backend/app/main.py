@@ -110,6 +110,32 @@ async def webrtc_offer(request: Request) -> Response:
     return Response(content=bridge_response.content, media_type="application/sdp")
 
 
+@app.get("/api/v1/diagnostics/hls/{asset:path}", include_in_schema=False)
+async def hls_diagnostic(asset: str, request: Request) -> Response:
+    """Proxy diagnostic HLS without exposing the go2rtc administrative API."""
+    allowed_assets = {"stream.m3u8", "playlist.m3u8", "segment.ts", "segment.m4s", "init.mp4"}
+    if asset not in allowed_assets:
+        raise HTTPException(status_code=404, detail="diagnostic asset unavailable")
+    settings = get_settings()
+    if asset == "stream.m3u8":
+        bridge_path = f"api/stream.m3u8?src={settings.camera_name}"
+    else:
+        query = request.url.query
+        bridge_path = f"api/hls/{asset}" + (f"?{query}" if query else "")
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            bridge_response = await client.get(f"http://go2rtc:1984/{bridge_path}")
+        except httpx.RequestError as error:
+            raise HTTPException(status_code=503, detail="video bridge unavailable") from error
+    if bridge_response.status_code >= 400:
+        raise HTTPException(status_code=503, detail="diagnostic stream unavailable")
+    content = bridge_response.content
+    content_type = bridge_response.headers.get("content-type", "application/octet-stream")
+    if asset == "stream.m3u8":
+        content = content.replace(b"hls/", b"/api/v1/diagnostics/hls/")
+    return Response(content=content, media_type=content_type)
+
+
 @app.websocket("/api/v1/detections")
 async def detections(websocket: WebSocket) -> None:
     hub: DetectionHub = websocket.app.state.hub

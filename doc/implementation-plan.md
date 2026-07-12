@@ -129,7 +129,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 - [x] Define `InferenceBackend` lifecycle and detection contracts: load/warm-up, detect, health, close, backend/model metadata, normalized box, class, confidence, source dimensions, timestamps, and timing metrics.
 - [x] Implement a fake deterministic backend first to validate orchestration and UI independent of ML/hardware.
-- [~] Implement Ultralytics YOLOv8n CPU inference; select CUDA automatically only when configured and available, with an explicit reported fallback. (Adapter and selection logic are present; fixture-backed contract validation remains.)
+- [x] Implement Ultralytics YOLOv8n CPU inference; select CUDA automatically only when configured and available, with an explicit reported fallback.
 - [x] Limit MVP classes to `person` by default while keeping filters configurable.
 - [x] Implement preprocessing with preserved aspect ratio and tested reverse coordinate mapping.
 - [x] Add configurable sampling and a size-one/bounded latest-frame queue; measure dropped, processed, and failed frames.
@@ -179,6 +179,11 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [ ] CPU inference works on x86; CUDA selection/fallback is reported accurately when applicable.
 - [ ] Automated backend, frontend, integration, Playwright, build, and security checks pass in GitHub Actions.
 - [ ] Manual smoke results record browser, end-to-end latency, view FPS, inference FPS, CPU/GPU utilization, and known limitations without retaining private media.
+
+### Phase 1 validation evidence
+
+- 2026-07-12: The production-style amd64 API image loaded the checksum-verified YOLOv8n weight on CPU and detected `person` (top confidence 0.87) from a public, temporary fixture; neither weight nor fixture was committed. The backend records CPU fallback when CUDA is unavailable.
+- 2026-07-12: The no-camera Compose stack ran with deterministic fake frames. Chromium verified connected detection metadata, an SVG `person` overlay, diagnostics, and the degraded WebRTC state. Real-camera latency/FPS and browser/WebRTC success remain explicit smoke work.
 
 ## Phase 2 — Complete Tripwire and deploy to the Orange Pi (pre-auth)
 

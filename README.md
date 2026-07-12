@@ -28,6 +28,16 @@ includes that optional runtime. Inference reads only the local
 `CAMZILLA_INFERENCE_RESTREAM_URL` from `go2rtc`; it does not open another
 physical-camera connection.
 
+To run the optional real-model contract check, download the verified weight
+listed in `models/manifest.yaml` and use a redistributable fixture image:
+
+```sh
+cd backend
+CAMZILLA_ULTRALYTICS_MODEL_PATH=../models/yolov8n.pt \
+CAMZILLA_ULTRALYTICS_FIXTURE_PATH=/path/to/public-fixture.jpg \
+uv run --extra ultralytics pytest tests/test_ultralytics_contract.py
+```
+
 Check configuration without printing values:
 
 ```sh
@@ -76,6 +86,8 @@ docker compose config
 
 Live-camera, CUDA, and eventual RKNN checks are opt-in hardware smoke tests;
 they must skip cleanly when unavailable and must not retain frames. If the API
-is healthy but video cannot connect, verify the camera configuration and local
-network/firewall, then use the documented HLS/MJPEG diagnostic fallback once it
-is enabled. Do not paste camera URLs or credentials into issues or logs.
+is healthy but WebRTC cannot connect, verify the camera configuration and local
+network/firewall, then use the page’s **Open HLS diagnostic fallback** link.
+That link proxies only the diagnostic stream through the API; it never exposes
+the `go2rtc` administrative endpoint or camera URL. Do not paste camera URLs or
+credentials into issues or logs.

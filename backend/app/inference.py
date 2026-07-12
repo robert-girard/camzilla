@@ -35,6 +35,14 @@ class InferenceBackend(Protocol):
     async def close(self) -> None: ...
 
 
+def select_inference_device(requested: str, cuda_available: bool) -> tuple[str, str | None]:
+    if requested == "cuda" and not cuda_available:
+        return "cpu", "CUDA requested but unavailable; using CPU"
+    if requested == "auto":
+        return ("cuda", None) if cuda_available else ("cpu", "CUDA unavailable; using CPU")
+    return requested, None
+
+
 class FakeInferenceBackend:
     """Stable person result for CI and UI work without ML weights or hardware."""
 
@@ -92,15 +100,9 @@ class UltralyticsBackend:
                 "Ultralytics backend requires `uv sync --extra ultralytics`"
             ) from error
         cuda_available = torch.cuda.is_available()
-        if self.requested_device == "cuda" and not cuda_available:
-            self.selected_device = "cpu"
-            self.fallback_reason = "CUDA requested but unavailable; using CPU"
-        elif self.requested_device == "auto":
-            self.selected_device = "cuda" if cuda_available else "cpu"
-            if not cuda_available:
-                self.fallback_reason = "CUDA unavailable; using CPU"
-        else:
-            self.selected_device = self.requested_device
+        self.selected_device, self.fallback_reason = select_inference_device(
+            self.requested_device, cuda_available
+        )
         self._model = YOLO(self.model_path)
         # Warm-up validates model/runtime initialization without retaining frames.
         import numpy as np

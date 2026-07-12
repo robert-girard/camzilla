@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.inference import DetectionWorker, FakeInferenceBackend, Frame
+from app.inference import DetectionWorker, FakeInferenceBackend, Frame, select_inference_device
 
 
 @pytest.mark.asyncio
@@ -32,3 +32,12 @@ async def test_confidence_filter_removes_fake_detection() -> None:
     worker = DetectionWorker(backend, frozenset({"person"}), 0.99, publish)
     result = await worker.process(Frame(640, 480, datetime.now(UTC)))
     assert result.detections == []
+
+
+def test_cuda_selection_reports_an_explicit_cpu_fallback() -> None:
+    assert select_inference_device("cuda", False) == (
+        "cpu",
+        "CUDA requested but unavailable; using CPU",
+    )
+    assert select_inference_device("auto", False) == ("cpu", "CUDA unavailable; using CPU")
+    assert select_inference_device("auto", True) == ("cuda", None)

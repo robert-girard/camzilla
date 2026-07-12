@@ -5,4 +5,4 @@ models:
     upstream: https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
     license: AGPL-3.0-or-later
     purpose: Phase 1 x86 CPU/CUDA person detection
-    sha256: pending-download-verification
+    sha256: f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36

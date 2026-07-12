@@ -110,7 +110,7 @@ export function App() {
         {videoState !== 'connected' && (
           <p className="video-placeholder">
             {videoState === 'degraded'
-              ? 'Video connection is unavailable. Use the diagnostic fallback.'
+              ? <><span>Video connection is unavailable. </span><a href="/api/v1/diagnostics/hls/stream.m3u8">Open HLS diagnostic fallback</a></>
               : `Connecting to ${stream?.camera_name ?? 'camera'}…`}
           </p>
         )}
