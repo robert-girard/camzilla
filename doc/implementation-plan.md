@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: planning baseline  
+Status: Phase 1 in progress
 Last updated: 2026-07-11  
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -99,22 +99,22 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 #### Decisions and foundation
 
-- [ ] Add AGPL-3.0 project license, Ultralytics attribution, and a third-party/model provenance document.
-- [ ] Record ADRs for video delivery, detection metadata, inference contract, and trusted-LAN/no-auth posture.
-- [ ] Scaffold `backend`, `frontend`, `infra`, deterministic fixtures, and model-manifest directories.
-- [ ] Define supported tool versions: Python, `uv`, Node/npm, Docker Engine/Compose, and browser baseline.
-- [ ] Create `.env.example` values with safe placeholders; ignore local overrides, generated `go2rtc` configuration, models, databases, captures, and test artifacts.
-- [ ] Add a validation command that reports missing configuration by variable name without displaying values.
+- [x] Add AGPL-3.0 project license, Ultralytics attribution, and a third-party/model provenance document.
+- [x] Record ADRs for video delivery, detection metadata, inference contract, and trusted-LAN/no-auth posture.
+- [~] Scaffold `backend`, `frontend`, `infra`, deterministic fixtures, and model-manifest directories. (Core directories and model manifest are present; deterministic fixture is pending.)
+- [x] Define supported tool versions: Python, `uv`, Node/npm, Docker Engine/Compose, and browser baseline.
+- [x] Create `.env.example` values with safe placeholders; ignore local overrides, generated `go2rtc` configuration, models, databases, captures, and test artifacts.
+- [~] Add a validation command that reports missing configuration by variable name without displaying values.
 
 #### Development and Compose workflow
 
-- [ ] Define the shared Compose topology for frontend, API/inference, and `go2rtc`.
-- [ ] Add a development override/profile: frontend source sync plus Vite HMR; backend source sync plus FastAPI/Uvicorn reload; stable `go2rtc` unless its config changes.
+- [x] Define the shared Compose topology for frontend, API/inference, and `go2rtc`.
+- [x] Add a development override/profile: frontend source sync plus Vite HMR; backend source sync plus FastAPI/Uvicorn reload; stable `go2rtc` unless its config changes.
 - [ ] Rebuild only when lockfiles, Dockerfiles, native dependencies, or model manifests change.
 - [ ] Document one-command startup, targeted service logs, rebuild, test, and teardown.
-- [ ] Define production-like Compose behavior with immutable images, non-root users where supported, read-only mounts where practical, health checks, restart policies, and no reloaders/source mounts.
-- [ ] Create the root `README.md` with a dev quick start (`docker compose` watch, Vite HMR, FastAPI reload), production-like x86 startup, prerequisites, configuration/secrets, ports and trusted-LAN/no-auth warning, test commands, health checks, troubleshooting, shutdown, and CI-safe versus hardware smoke-test guidance.
-- [ ] State clearly in the root README that Phase 1 production-like Compose validates packaging and CPU/CUDA operation, while supported Orange Pi/RKNN deployment is delivered and documented in Phase 2.
+- [x] Define production-like Compose behavior with immutable images, non-root users where supported, read-only mounts where practical, health checks, restart policies, and no reloaders/source mounts.
+- [x] Create the root `README.md` with a dev quick start (`docker compose` watch, Vite HMR, FastAPI reload), production-like x86 startup, prerequisites, configuration/secrets, ports and trusted-LAN/no-auth warning, test commands, health checks, troubleshooting, shutdown, and CI-safe versus hardware smoke-test guidance.
+- [x] State clearly in the root README that Phase 1 production-like Compose validates packaging and CPU/CUDA operation, while supported Orange Pi/RKNN deployment is delivered and documented in Phase 2.
 
 #### Camera and streaming
 

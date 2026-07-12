@@ -1,0 +1,8 @@
+# Only provenance metadata belongs in Git. Downloaded weights and converted model
+# artifacts are ignored; record their checksum before using them.
+models:
+  - id: yolov8n
+    upstream: https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
+    license: AGPL-3.0-or-later
+    purpose: Phase 1 x86 CPU/CUDA person detection
+    sha256: pending-download-verification

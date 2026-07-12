@@ -1,0 +1,7 @@
+# Static, credential-free configuration. Runtime stream configuration is generated
+# from environment secrets and is intentionally ignored by Git.
+api:
+  listen: ":1984"
+webrtc:
+  listen: ":8555"
+streams: {}

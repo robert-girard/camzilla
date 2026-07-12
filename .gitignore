@@ -1,11 +1,35 @@
-# secrets
+# secrets and generated runtime configuration
 .env
+.env.*
+!.env.example
+infra/go2rtc/generated.yaml
 
-# captures
+# private captures and runtime data
+captures/
+recordings/
+data/
 *.avi
 *.mkv
 *.jpg
+*.jpeg
+*.png
 *.h264
 
-# python
-*.pyc
+# model artifacts (manifests are intentionally tracked)
+models/*.pt
+models/*.onnx
+models/*.rknn
+
+# test/build artifacts
+playwright-report/
+test-results/
+coverage/
+node_modules/
+dist/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/

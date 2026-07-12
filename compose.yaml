@@ -1,0 +1,49 @@
+name: camzilla
+
+services:
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CAMZILLA_INFERENCE_BACKEND: ${CAMZILLA_INFERENCE_BACKEND:-fake}
+    ports:
+      - "${CAMZILLA_BIND_HOST:-127.0.0.1}:${CAMZILLA_API_PORT:-8000}:8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  go2rtc:
+    build:
+      context: ./infra/go2rtc
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    # No host port: administrative API stays on the internal Compose network.
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${CAMZILLA_BIND_HOST:-127.0.0.1}:${CAMZILLA_FRONTEND_PORT:-5173}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
