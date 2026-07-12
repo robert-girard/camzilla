@@ -173,14 +173,17 @@ def main():
     load_env_file()
 
     parser = argparse.ArgumentParser(description="Fetch an RTSP URL from an ONVIF camera.")
-    parser.add_argument("--host", default="192.168.0.41")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default=os.getenv("CAMERA_HOST", ""))
+    parser.add_argument("--port", type=int, default=int(os.getenv("ONVIF_PORT", "8000")))
     parser.add_argument("--media-path", default="/onvif/Media")
     parser.add_argument("--user", default=os.getenv("ONVIF_USER", ""))
     parser.add_argument("--password", default=os.getenv("ONVIF_PASSWORD", ""))
     parser.add_argument("--wait", type=int, default=60)
     parser.add_argument("--play", action="store_true")
     args = parser.parse_args()
+
+    if not args.host:
+        parser.error("CAMERA_HOST must be set in .env or passed with --host")
 
     if not wait_for_port(args.host, args.port, args.wait):
         print(f"Timed out waiting for {args.host}:{args.port} to open.", file=sys.stderr)

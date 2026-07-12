@@ -104,17 +104,20 @@ def main():
 
     parser = argparse.ArgumentParser(description="Send a short ONVIF PTZ move.")
     parser.add_argument("direction", choices=["left", "right", "up", "down", "in", "out"])
-    parser.add_argument("--host", default="192.168.0.41")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default=os.getenv("CAMERA_HOST", ""))
+    parser.add_argument("--port", type=int, default=int(os.getenv("ONVIF_PORT", "8000")))
     parser.add_argument("--user", default=os.getenv("ONVIF_USER", ""))
     parser.add_argument("--password", default=os.getenv("ONVIF_PASSWORD", ""))
-    parser.add_argument("--profile", default="PROFILE_000")
+    parser.add_argument("--profile", default=os.getenv("ONVIF_PROFILE", "PROFILE_000"))
     parser.add_argument("--speed", type=float, default=0.2)
     parser.add_argument("--seconds", type=int, default=1)
     args = parser.parse_args()
 
-    if not args.user or not args.password:
-        parser.error("ONVIF_USER and ONVIF_PASSWORD must be set in .env or passed as arguments")
+    if not args.host or not args.user or not args.password:
+        parser.error(
+            "CAMERA_HOST, ONVIF_USER, and ONVIF_PASSWORD must be set in .env "
+            "or passed as arguments"
+        )
 
     pan = tilt = zoom = 0.0
     if args.direction == "left":

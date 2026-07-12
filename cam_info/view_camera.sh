@@ -18,9 +18,10 @@ fi
 if [[ $# -gt 0 ]]; then
   uri="$1"
 else
+  : "${CAMERA_HOST:?Set CAMERA_HOST in .env or pass an RTSP URI as the first argument}"
   : "${ONVIF_USER:?Set ONVIF_USER in .env or pass an RTSP URI as the first argument}"
   : "${ONVIF_PASSWORD:?Set ONVIF_PASSWORD in .env or pass an RTSP URI as the first argument}"
-  uri="rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101"
+  uri="rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT:-8554}${RTSP_PATH:-/Streaming/Channels/101}"
 fi
 
 env -i \

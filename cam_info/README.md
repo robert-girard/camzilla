@@ -3,8 +3,7 @@
 ## Device
 
 - Camera: BCXAXA IP camera
-- LAN IP: `192.168.0.41`
-- Observed MAC: `38:be:ab:b8:ab:af`
+- LAN host: stored in `.env` as `CAMERA_HOST`
 - ONVIF username: stored in `.env` as `ONVIF_USER`
 - ONVIF password: stored in `.env` as `ONVIF_PASSWORD`
 
@@ -14,15 +13,15 @@ The camera initially looked closed from a normal port scan, but after ONVIF was 
 
 The device advertises these ONVIF service addresses:
 
-- Device: `http://192.168.0.41:8000/onvif/device_service`
-- Media: `http://192.168.0.41:8000/onvif/Media`
-- PTZ: `http://192.168.0.41:8000/onvif/PTZ`
-- Imaging: `http://192.168.0.41:8000/onvif/Imaging`
-- DeviceIO: `http://192.168.0.41:8000/onvif/DeviceIO`
-- Analytics: `http://192.168.0.41:8000/onvif/Analytics`
-- Recording: `http://192.168.0.41:8000/onvif/Recording`
-- Search: `http://192.168.0.41:8000/onvif/SearchRecording`
-- Replay: `http://192.168.0.41:8000/onvif/Replay`
+- Device: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/device_service`
+- Media: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/Media`
+- PTZ: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/PTZ`
+- Imaging: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/Imaging`
+- DeviceIO: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/DeviceIO`
+- Analytics: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/Analytics`
+- Recording: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/Recording`
+- Search: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/SearchRecording`
+- Replay: `http://${CAMERA_HOST}:${ONVIF_PORT}/onvif/Replay`
 
 The helper script `onvif_stream.py` queries the ONVIF media service for profiles and the stream URI:
 
@@ -38,13 +37,13 @@ Known profiles:
 The first profile returned this RTSP URL:
 
 ```text
-rtsp://192.168.0.41:8554/Streaming/Channels/101
+rtsp://${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}
 ```
 
 RTSP requires authentication, so most tools should use:
 
 ```text
-rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101
+rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}
 ```
 
 ## RTSP Stream
@@ -180,7 +179,7 @@ That makes `/usr/bin/gst-launch-1.0` use the system GStreamer libraries.
 VLC should play the RTSP URL directly:
 
 ```text
-rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101
+rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}
 ```
 
 VLC did not play the raw `stream.h264` recording reliably because that file was only an elementary H.264 stream, not a media container with timestamps and metadata.
@@ -236,7 +235,7 @@ This proves video capture works, but the output is not a normal playable contain
 Raw mode is still available:
 
 ```bash
-./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101" stream.h264 30 raw
+./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}" stream.h264 30 raw
 ```
 
 ### Why `h264parse` Matters
@@ -284,7 +283,7 @@ In command form:
 
 ```bash
 gst-launch-1.0 -e \
-  rtspsrc name=src location="rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101" protocols=tcp latency=200 \
+  rtspsrc name=src location="rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}" protocols=tcp latency=200 \
   src. ! 'application/x-rtp,media=video,encoding-name=H264' ! \
   rtph264depay ! h264parse config-interval=-1 ! matroskamux ! filesink location=camera.mkv
 ```
@@ -306,7 +305,7 @@ camera.mkv
 Custom duration/output:
 
 ```bash
-./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101" front-door.mkv 60
+./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}" front-door.mkv 60
 ```
 
 ### AVI/MJPEG Fallback
@@ -333,7 +332,7 @@ Cons:
 AVI fallback is still available:
 
 ```bash
-./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101" camera.avi 30 avi
+./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}" camera.avi 30 avi
 ```
 
 ## Files in This Workspace
@@ -364,7 +363,7 @@ Record 30 seconds to MKV:
 Record 60 seconds to a named MKV:
 
 ```bash
-./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101" camera-60s.mkv 60
+./record_camera.sh "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}" camera-60s.mkv 60
 ```
 
 Move PTZ right briefly:
@@ -376,5 +375,5 @@ Move PTZ right briefly:
 Open directly in VLC:
 
 ```bash
-vlc "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@192.168.0.41:8554/Streaming/Channels/101"
+vlc "rtsp://${ONVIF_USER}:${ONVIF_PASSWORD}@${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}"
 ```
