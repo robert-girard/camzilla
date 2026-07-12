@@ -1,5 +1,11 @@
 # BCXAXA Camera Notes
 
+## Document Role
+
+This file records sanitized, device-specific observations for Camzilla's first camera. Use it when implementing or diagnosing ONVIF discovery, RTSP intake, media profiles/codecs, GStreamer pipelines, PTZ, or opt-in hardware smoke tests. It is not a general camera contract and the physical device must never be required by CI.
+
+See the [PRD](../doc/PRD-home-security-ai-alerts.md) for product requirements, the [design document](../doc/design-doc-home-security-ai-alerts.md) for how this camera fits the streaming/inference architecture, and the [implementation plan](../doc/implementation-plan.md) for scheduled camera work and acceptance criteria. Keep real addresses, credentials, captures, and household details in ignored local configuration—not this public document.
+
 ## Device
 
 - Camera: BCXAXA IP camera
