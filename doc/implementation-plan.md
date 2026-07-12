@@ -118,12 +118,12 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 #### Camera and streaming
 
-- [ ] Define the minimal camera source contract without exposing raw credentials to API responses or logs.
+- [x] Define the minimal camera source contract without exposing raw credentials to API responses or logs.
 - [ ] Query both ONVIF profiles and record sanitized codec/resolution/bitrate capabilities; select viewer and inference profiles based on measurements.
-- [ ] Configure `go2rtc` from runtime secrets so it owns one upstream RTSP connection.
-- [ ] Restrict the `go2rtc` administrative/API surface to the internal Compose network and allow only required paths/modules.
-- [ ] Implement a backend-issued/sanitized stream descriptor for the frontend; never send the camera RTSP URL to the browser.
-- [ ] Add WebRTC connection/loading/error/retry states and a documented HLS/MJPEG diagnostic fallback.
+- [~] Configure `go2rtc` from runtime secrets so it owns one upstream RTSP connection. (Runtime-secret configuration is present; physical-camera smoke validation remains.)
+- [x] Restrict the `go2rtc` administrative/API surface to the internal Compose network and allow only required paths/modules.
+- [x] Implement a backend-issued/sanitized stream descriptor for the frontend; never send the camera RTSP URL to the browser.
+- [~] Add WebRTC connection/loading/error/retry states and a documented HLS/MJPEG diagnostic fallback. (WHEP loading/error states are present; fallback endpoint and physical smoke are pending.)
 
 #### Inference and detection transport
 
@@ -133,17 +133,17 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [x] Limit MVP classes to `person` by default while keeping filters configurable.
 - [x] Implement preprocessing with preserved aspect ratio and tested reverse coordinate mapping.
 - [x] Add configurable sampling and a size-one/bounded latest-frame queue; measure dropped, processed, and failed frames.
-- [ ] Consume a local `go2rtc` restream rather than opening a second physical-camera session where supported.
+- [~] Consume a local `go2rtc` restream rather than opening a second physical-camera session where supported. (Local-restream adapter is present; physical-camera smoke validation remains.)
 - [x] Publish versioned detection messages over WebSocket with heartbeat, reconnect behavior, monotonic sequence, capture/result timestamps, and result age.
 - [~] Expose redacted health/readiness information for camera, bridge, inference backend/model, WebSocket clients, FPS, and latency. (Backend and pipeline counters are present; camera/bridge and rate/latency readiness are pending.)
 
 #### Frontend
 
-- [ ] Build a responsive single-camera page with accessible loading, connected, degraded, and disconnected states.
-- [ ] Render WebRTC video with a separate non-interactive canvas/SVG overlay.
-- [ ] Correctly transform normalized boxes through video scaling, letterboxing, resize, fullscreen, and device-pixel-ratio changes.
-- [ ] Show class and confidence, backend/model identity, inference FPS/latency, and connection health in a compact diagnostics panel.
-- [ ] Expire stale detections and visually distinguish degraded metadata from a live video stream.
+- [~] Build a responsive single-camera page with accessible loading, connected, degraded, and disconnected states.
+- [~] Render WebRTC video with a separate non-interactive canvas/SVG overlay.
+- [~] Correctly transform normalized boxes through video scaling, letterboxing, resize, fullscreen, and device-pixel-ratio changes. (SVG source-coordinate mapping is implemented; browser resize/fullscreen coverage is pending.)
+- [~] Show class and confidence, backend/model identity, inference FPS/latency, and connection health in a compact diagnostics panel.
+- [~] Expire stale detections and visually distinguish degraded metadata from a live video stream.
 - [ ] Keep server state in an API/query layer; introduce Zustand only for shared client state that React-local state cannot reasonably own.
 
 #### Backend tests
