@@ -11,6 +11,8 @@ Camzilla is a public, self-hosted camera viewer and edge object-detection projec
 
 Explicit user direction takes precedence. The PRD governs product intent; the implementation plan governs accepted sequencing and completion; the design governs the current technical approach. These documents should agree. If implementation exposes a conflict, do not silently choose one: make the smallest consistent update to every affected document and note a material tradeoff in an ADR. Do not silently expand the active phase; record newly discovered work in the appropriate phase or deferred-work section.
 
+Phase 1 will add a root `README.md` as the operational entry point. Once present, keep its dev/prod quick starts, configuration reference, test commands, security warnings, and troubleshooting steps synchronized with validated behavior. The README explains how to use the system; it does not replace the product, design, or planning sources above.
+
 ## Security and privacy
 
 - Treat camera credentials, webhook URLs, tokens, LAN addresses, MAC addresses, captures, and information visible in frames as sensitive.

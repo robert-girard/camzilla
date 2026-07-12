@@ -23,6 +23,8 @@ This document records Camzilla's current technical direction: deployment targets
 | Video bridging (browser) | **WebRTC through `go2rtc`** | HLS/MJPEG is a diagnostic fallback; see §4 |
 | Detection metadata | **Versioned backend WebSocket** | Timestamped normalized boxes rendered over video in the browser |
 | Detection model | **YOLOv8n initially** | Benchmark other sizes/generations before adoption; see §6 |
+| Relational persistence | **SQLite + SQLAlchemy 2 + Alembic** | Phase 3; local single-node metadata/config/events, with a PostgreSQL migration path |
+| Media persistence | **Filesystem with database references** | Snapshots/clips stay out of database blobs; retention owns lifecycle |
 | Local orchestration | **Docker Compose development override/watch** | Vite HMR and FastAPI reload without ordinary source rebuilds |
 | CI | **GitHub Actions** | Tests/checks/builds first; deployment pipelines deferred |
 
@@ -98,9 +100,18 @@ The RK3588 NPU doesn't hold model weights persistently on-chip — it has small 
 ## 9. Development, Deployment, Security, and CI
 
 - Shared Compose service definitions describe the production-like topology. A development override/watch configuration syncs source into containers, runs Vite HMR and FastAPI/Uvicorn reload, and rebuilds only for dependency/container changes. Production uses immutable images, no source mounts/reloaders, health checks, and explicit restart policy.
+- Phase 1 creates a root `README.md` as the developer/operator entry point. It documents live-reload development, production-like x86 operation, configuration/security, tests, health, troubleshooting, and that supported Orange Pi/RKNN deployment begins in Phase 2.
 - Pre-auth phases bind application endpoints to loopback by default; trusted-LAN exposure is explicit. `go2rtc` administration remains internal. Authenticated RTSP URLs and secrets are redacted from logs, errors, health, metrics, browser payloads, and CI artifacts.
 - GitHub Actions runs backend lint/type/tests, frontend lint/type/tests/build, deterministic Playwright flows, secret/privacy checks, Compose validation, and amd64 builds. Physical camera, CUDA, and RKNN tests are opt-in or later self-hosted jobs and skip cleanly when hardware is absent.
 - Real captures, recordings, home-derived calibration images, generated credential-bearing configuration, databases, and large model artifacts are never committed. CI uses synthetic or explicitly redistributable fixtures.
+
+### 9.1 Persistence Direction
+
+- Phase 3 stores cameras, verified capabilities, alert rules, event metadata, configuration versions, and secret references in SQLite on local Orange Pi storage through SQLAlchemy 2 and Alembic migrations.
+- Snapshots and clips are filesystem objects with database metadata/references. Retention coordinates deletion of both; media is not stored as database blobs.
+- Plaintext credentials and authenticated camera/notifier URLs are not persisted. Database rows refer to environment/external secret identifiers.
+- Keep transaction and repository boundaries portable to PostgreSQL. PostgreSQL becomes appropriate for multiple application instances, a remote/shared database, or sustained concurrent-write pressure; it is not required for the initial single-node deployment.
+- Do not place SQLite database/WAL files on a network filesystem. Backup/restore and disk-full behavior require integration tests before persistence is considered complete.
 
 ## 10. Implementation Sequence
 

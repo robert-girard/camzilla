@@ -113,6 +113,7 @@ These are foundational design decisions that should be in place from the start, 
 
 ### 6.8 Configuration Management
 - **Tier 2:** config backup/export so camera and alert setup isn't lost if the Orange Pi has issues. Exports exclude secrets by default.
+- Persistent configuration and event metadata must support schema migrations and backup/restore. Media is retained separately from relational metadata, and credentials remain external to persisted application state.
 
 ## 7. Open Questions / Discovery Items
 

@@ -27,6 +27,8 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 - GitHub Actions provides CI for tests, checks, and builds. Deployment automation is deferred.
 - The MVP uses Ultralytics and YOLOv8 under AGPL-3.0. Add the project license and third-party notices before introducing the dependency. Keep inference pluggable to preserve a future replacement/enterprise-license path.
 - No authentication is present until Phase 4. Before then, services bind to loopback by default; LAN access is explicit and documented as trusted-network-only.
+- Phase 1 creates a root `README.md` as the developer/operator entry point, covering development live reload, production-like x86 usage, configuration, security, tests, health, troubleshooting, and the Phase 2 boundary for Orange Pi/RKNN support.
+- Persistent relational state uses SQLite on local storage with SQLAlchemy 2 and Alembic. Media remains in filesystem storage, credentials remain in environment/external secrets, and PostgreSQL is a later migration path for multi-instance or write-heavy deployments rather than an initial dependency.
 
 ## Review of the PRD and preliminary design
 
@@ -111,6 +113,8 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [ ] Rebuild only when lockfiles, Dockerfiles, native dependencies, or model manifests change.
 - [ ] Document one-command startup, targeted service logs, rebuild, test, and teardown.
 - [ ] Define production-like Compose behavior with immutable images, non-root users where supported, read-only mounts where practical, health checks, restart policies, and no reloaders/source mounts.
+- [ ] Create the root `README.md` with a dev quick start (`docker compose` watch, Vite HMR, FastAPI reload), production-like x86 startup, prerequisites, configuration/secrets, ports and trusted-LAN/no-auth warning, test commands, health checks, troubleshooting, shutdown, and CI-safe versus hardware smoke-test guidance.
+- [ ] State clearly in the root README that Phase 1 production-like Compose validates packaging and CPU/CUDA operation, while supported Orange Pi/RKNN deployment is delivered and documented in Phase 2.
 
 #### Camera and streaming
 
@@ -230,8 +234,9 @@ The system becomes convenient for daily personal use before authentication is in
 
 ### Tasks
 
-- [ ] Select SQLite plus migrations for a single-node deployment; keep media outside database rows.
+- [ ] Implement SQLite persistence through SQLAlchemy 2 with Alembic migrations for the single-node deployment; keep media outside database rows and avoid SQLite database files on network filesystems.
 - [ ] Persist cameras, capability results, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
+- [ ] Keep the persistence/domain boundary compatible with a later PostgreSQL adapter and document the operational conditions that justify migration (multiple app instances, shared/remote database, or sustained write contention).
 - [ ] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion.
 - [ ] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
 - [ ] Add pre-roll ring buffering and configurable 5–30 second alert clips with storage quotas and oldest-first retention.
