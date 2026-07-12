@@ -1,0 +1,11 @@
+# secrets
+.env
+
+# captures
+*.avi
+*.mkv
+*.jpg
+*.h264
+
+# python
+*.pyc
