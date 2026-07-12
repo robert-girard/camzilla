@@ -1,24 +1,25 @@
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
-from .config import get_settings
+from .config import Settings, get_settings
 from .contracts import StreamDescriptor
 from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
 from .pipeline import InferencePipeline, OpenCvRestreamSource, SyntheticFrameSource
 from .transport import DetectionHub
 
 
-def build_backend(settings) -> InferenceBackend:
+def build_backend(settings: Settings) -> InferenceBackend:
     if settings.inference_backend == "ultralytics":
         return UltralyticsBackend(settings.model_id, settings.model_path, settings.inference_device)
     return FakeInferenceBackend(settings.model_id)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     backend = build_backend(settings)
     await backend.load()

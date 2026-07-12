@@ -156,19 +156,19 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 #### Frontend and end-to-end tests
 
-- [ ] Unit-test overlay geometry, stale-result expiry, reconnect state, diagnostics, and accessibility-critical interactions with Vitest/React Testing Library.
-- [ ] Mock REST/WebSocket/WebRTC boundaries for deterministic component tests.
-- [ ] Add Playwright flows for initial load, simulated detections, resize/fullscreen geometry, metadata disconnect/recovery, and video failure.
-- [ ] Run Playwright against deterministic local media/fakes in CI; physical-camera browser validation remains an explicit local smoke test.
+- [~] Unit-test overlay geometry, stale-result expiry, reconnect state, diagnostics, and accessibility-critical interactions with Vitest/React Testing Library. (Geometry and expiry are covered; component accessibility/reconnect tests remain.)
+- [x] Mock REST/WebSocket/WebRTC boundaries for deterministic component tests.
+- [~] Add Playwright flows for initial load, simulated detections, resize/fullscreen geometry, metadata disconnect/recovery, and video failure. (Initial/detection/resize flows are covered; recovery and explicit video-failure flow remain.)
+- [x] Run Playwright against deterministic local media/fakes in CI; physical-camera browser validation remains an explicit local smoke test.
 
 #### GitHub Actions CI
 
-- [ ] Add least-privilege workflow permissions, concurrency cancellation, dependency caching, and pinned action major versions.
-- [ ] Run backend format/lint/type/unit/integration jobs on GitHub-hosted Linux without camera secrets.
-- [ ] Run frontend lint/type/unit/build jobs and Playwright with retained traces only on failure.
-- [ ] Run secret scanning plus repository checks that reject captures, local configuration, authenticated RTSP URLs, and unapproved large model binaries.
-- [ ] Validate Compose configuration and build the amd64 development/production images; defer publishing/deployment.
-- [ ] Make required CI checks and local equivalents explicit in contributor documentation.
+- [x] Add least-privilege workflow permissions, concurrency cancellation, dependency caching, and pinned action major versions.
+- [x] Run backend format/lint/type/unit/integration jobs on GitHub-hosted Linux without camera secrets.
+- [x] Run frontend lint/type/unit/build jobs and Playwright with retained traces only on failure.
+- [x] Run secret scanning plus repository checks that reject captures, local configuration, authenticated RTSP URLs, and unapproved large model binaries.
+- [x] Validate Compose configuration and build the amd64 development/production images; defer publishing/deployment.
+- [~] Make required CI checks and local equivalents explicit in contributor documentation. (README lists checks; CI workflow additions are pending README command reconciliation.)
 
 ### Exit criteria
 

@@ -27,7 +27,7 @@ class LatestItemQueue(Generic[T]):
 
 
 async def consume_latest(
-    queue: LatestItemQueue[T], handler: Callable[[T], Awaitable[None]]
+    queue: LatestItemQueue[T], handler: Callable[[T], Awaitable[object]]
 ) -> None:
     while True:
         item = await queue.get()

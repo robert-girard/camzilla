@@ -4,4 +4,5 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: { proxy: { '/api': { target: 'http://api:8000', ws: true }, '/health': 'http://api:8000' } },
+  test: { exclude: ['e2e/**', 'node_modules/**'] },
 })

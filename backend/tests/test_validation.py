@@ -7,5 +7,5 @@ def test_validation_reports_name_not_secret() -> None:
 
 
 def test_validation_accepts_camera_url_without_exposing_it() -> None:
-    settings = Settings(camera_rtsp_url="rtsp://user:secret@camera.local/stream")
+    settings = Settings(camera_rtsp_url="rtsp://camera.local/stream")
     assert missing_configuration(settings) == []

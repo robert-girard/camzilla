@@ -3,8 +3,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN useradd --create-home --uid 10001 appuser
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir ".[ultralytics]"
 COPY app ./app
+# Install a CPU wheel explicitly: PyPI's Linux torch wheel pulls CUDA runtime
+# packages even for the default CPU deployment. CUDA is selected at runtime only
+# in a separately GPU-enabled image/environment.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && pip install --no-cache-dir ".[ultralytics]"
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"

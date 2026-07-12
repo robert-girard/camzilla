@@ -68,8 +68,9 @@ deliverable, not a supported Phase 1 production target.
 These commands are CI-safe and use no camera or secret:
 
 ```sh
-(cd backend && uv run pytest && uv run ruff check .)
-(cd frontend && npm install && npm run lint && npm run typecheck && npm test && npm run build)
+(cd backend && uv run mypy app && uv run pytest && uv run ruff check .)
+(cd frontend && npm ci && npm run lint && npm run typecheck && npm test && npm run build)
+(cd frontend && npx playwright install chromium && npm run test:e2e)
 docker compose config
 ```
 
