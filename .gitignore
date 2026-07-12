@@ -22,6 +22,7 @@ models/*.rknn
 
 # test/build artifacts
 playwright-report/
+.playwright-cli/
 test-results/
 coverage/
 node_modules/
@@ -33,3 +34,4 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+*.egg-info/

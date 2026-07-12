@@ -12,6 +12,15 @@ export function overlayRect(box: NormalizedBox, content: Rect): Rect {
   }
 }
 
+export function sourceRect(box: NormalizedBox, sourceWidth: number, sourceHeight: number): Rect {
+  return {
+    x: box.x * sourceWidth,
+    y: box.y * sourceHeight,
+    width: box.width * sourceWidth,
+    height: box.height * sourceHeight,
+  }
+}
+
 export function isStale(resultTimestamp: string, ttlSeconds: number, now = Date.now()): boolean {
   return now - Date.parse(resultTimestamp) > ttlSeconds * 1_000
 }

@@ -9,6 +9,8 @@ services:
         required: false
     environment:
       CAMZILLA_INFERENCE_BACKEND: ${CAMZILLA_INFERENCE_BACKEND:-fake}
+    volumes:
+      - ./models:/models:ro
     ports:
       - "${CAMZILLA_BIND_HOST:-127.0.0.1}:${CAMZILLA_API_PORT:-8000}:8000"
     restart: unless-stopped
@@ -28,12 +30,19 @@ services:
     build:
       context: ./infra/go2rtc
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      # ICE media only. The administrative HTTP API has no host binding.
+      - "${CAMZILLA_BIND_HOST:-127.0.0.1}:8555:8555/tcp"
+      - "${CAMZILLA_BIND_HOST:-127.0.0.1}:8555:8555/udp"
     read_only: true
     tmpfs:
       - /tmp
     security_opt:
       - no-new-privileges:true
-    # No host port: administrative API stays on the internal Compose network.
+    # No HTTP host port: the go2rtc administrative API stays internal.
 
   frontend:
     build:

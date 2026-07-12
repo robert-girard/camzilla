@@ -38,5 +38,5 @@ class DetectionMessage(BaseModel):
 
 class StreamDescriptor(BaseModel):
     camera_name: str
-    webrtc_path: str
+    webrtc_path: str = "/api/v1/webrtc"
     diagnostic_fallback: Literal["hls", "mjpeg"] = "hls"

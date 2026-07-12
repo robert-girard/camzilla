@@ -2,6 +2,12 @@
 # from environment secrets and is intentionally ignored by Git.
 api:
   listen: ":1984"
+  # This port is not published to the host. FastAPI proxies only WHEP signaling.
+  allow_paths:
+    - /api/webrtc
 webrtc:
   listen: ":8555"
-streams: {}
+  candidates:
+    - ${CAMZILLA_WEBRTC_CANDIDATE:127.0.0.1:8555}
+streams:
+  front-door: ${CAMZILLA_CAMERA_RTSP_URL}

@@ -21,6 +21,13 @@ only on a trusted LAN. Phase 1 has no authentication, so LAN exposure permits
 any network peer to use the viewer. The `go2rtc` administrative API is internal
 only, and camera URLs are not returned by the API.
 
+For real YOLO inference, place the verified `yolov8n.pt` artifact in the ignored
+`models/` directory, set `CAMZILLA_INFERENCE_BACKEND=ultralytics`, and use
+`uv sync --extra ultralytics` for a host-side backend run. The Compose image
+includes that optional runtime. Inference reads only the local
+`CAMZILLA_INFERENCE_RESTREAM_URL` from `go2rtc`; it does not open another
+physical-camera connection.
+
 Check configuration without printing values:
 
 ```sh
