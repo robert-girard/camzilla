@@ -152,7 +152,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [ ] Contract-test fake and Ultralytics backends with the same redistributable images and tolerance-based expected detections.
 - [ ] Integration-test the recorded/synthetic stream through sampling, fake inference, and WebSocket delivery without a physical camera.
 - [ ] Test camera/bridge loss, inference exception, slow inference, WebSocket reconnect, and clean shutdown.
-- [ ] Add opt-in live-camera smoke tests that skip clearly when credentials/network are unavailable and never retain frames.
+- [x] Add opt-in live-camera smoke tests that skip clearly when credentials/network are unavailable and never retain frames.
 
 #### Frontend and end-to-end tests
 

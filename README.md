@@ -38,6 +38,17 @@ CAMZILLA_ULTRALYTICS_FIXTURE_PATH=/path/to/public-fixture.jpg \
 uv run --extra ultralytics pytest tests/test_ultralytics_contract.py
 ```
 
+With the Compose stack and real camera already running, an explicit local-only
+smoke check reads one in-memory frame from the **local go2rtc restream** and
+retains nothing:
+
+```sh
+cd backend
+CAMZILLA_HARDWARE_SMOKE=1 \
+CAMZILLA_INFERENCE_RESTREAM_URL=rtsp://127.0.0.1:8554/front-door \
+uv run --extra ultralytics pytest tests/test_live_camera_smoke.py
+```
+
 Check configuration without printing values:
 
 ```sh

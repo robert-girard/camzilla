@@ -34,6 +34,8 @@ services:
       - path: .env
         required: false
     ports:
+      # Local inference/hardware smoke restream only; never browser-facing.
+      - "${CAMZILLA_BIND_HOST:-127.0.0.1}:8554:8554/tcp"
       # ICE media only. The administrative HTTP API has no host binding.
       - "${CAMZILLA_BIND_HOST:-127.0.0.1}:8555:8555/tcp"
       - "${CAMZILLA_BIND_HOST:-127.0.0.1}:8555:8555/udp"
