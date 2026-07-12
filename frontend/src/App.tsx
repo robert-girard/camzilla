@@ -18,6 +18,7 @@ export function App() {
   const [stream, setStream] = useState<StreamDescriptor>()
   const [result, setResult] = useState<DetectionMessage>()
   const [videoState, setVideoState] = useState<VideoState>('loading')
+  const [now, setNow] = useState(Date.now())
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
@@ -84,7 +85,12 @@ export function App() {
     }
   }, [])
 
-  const stale = result ? isStale(result.result_timestamp, ttlSeconds) : false
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(timer)
+  }, [])
+
+  const stale = result ? isStale(result.result_timestamp, ttlSeconds, now) : false
   const visible = result && !stale ? result.detections : []
   const age = result ? Math.max(0, (Date.now() - Date.parse(result.result_timestamp)) / 1_000) : undefined
   const sourceWidth = result?.source_width ?? 1
