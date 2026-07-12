@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN useradd --create-home --uid 10001 appuser
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" pydantic-settings
+RUN pip install --no-cache-dir ".[ultralytics]"
 COPY app ./app
 USER appuser
 EXPOSE 8000

@@ -20,3 +20,12 @@ def test_readiness_does_not_return_camera_url() -> None:
         response = client.get("/health/ready")
     assert response.status_code == 200
     assert "camera_rtsp_url" not in response.text
+
+
+def test_fake_pipeline_delivers_versioned_detection_over_websocket() -> None:
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/detections") as websocket:
+            message = websocket.receive_json()
+    assert message["version"] == "v1"
+    assert message["sequence"] >= 0
+    assert message["detections"][0]["class_name"] == "person"

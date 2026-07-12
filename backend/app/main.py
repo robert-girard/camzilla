@@ -1,19 +1,25 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .config import get_settings
 from .contracts import StreamDescriptor
-from .inference import DetectionWorker, FakeInferenceBackend, Frame
+from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
+from .pipeline import InferencePipeline, SyntheticFrameSource
 from .transport import DetectionHub
+
+
+def build_backend(settings) -> InferenceBackend:
+    if settings.inference_backend == "ultralytics":
+        return UltralyticsBackend(settings.model_id, settings.model_path, settings.inference_device)
+    return FakeInferenceBackend(settings.model_id)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    backend = FakeInferenceBackend(settings.model_id)
+    backend = build_backend(settings)
     await backend.load()
     hub = DetectionHub()
     app.state.backend = backend
@@ -21,6 +27,11 @@ async def lifespan(app: FastAPI):
     app.state.worker = DetectionWorker(
         backend, settings.class_filter, settings.confidence_threshold, hub.publish
     )
+    pipeline = InferencePipeline(app.state.worker)
+    # Until the local restream is configured, fake mode uses no-camera synthetic
+    # frames. It keeps development/CI deterministic and exercises transport.
+    await pipeline.start(SyntheticFrameSource(settings.inference_fps).frames())
+    app.state.pipeline = pipeline
     heartbeat = asyncio.create_task(hub.heartbeat())
     try:
         yield
@@ -28,6 +39,7 @@ async def lifespan(app: FastAPI):
         heartbeat.cancel()
         with suppress(asyncio.CancelledError):
             await heartbeat
+        await pipeline.close()
         await backend.close()
 
 
@@ -42,11 +54,24 @@ async def live() -> dict[str, str]:
 @app.get("/health/ready")
 async def ready() -> dict[str, object]:
     settings = get_settings()
+    backend_health = await app.state.backend.health()
+    worker: DetectionWorker = app.state.worker
+    pipeline: InferencePipeline = app.state.pipeline
     return {
         "status": "ready",
         "camera_configured": settings.camera_rtsp_url is not None,
-        "inference": {"backend": settings.inference_backend, "model": settings.model_id},
+        "inference": {
+            "backend": backend_health.backend_id,
+            "model": backend_health.model_id,
+            "ready": backend_health.ready,
+            "device": backend_health.device,
+        },
         "websocket_clients": app.state.hub.clients,
+        "metrics": {
+            "processed_frames": worker.processed_frames,
+            "failed_frames": worker.failed_frames,
+            "dropped_frames": pipeline.dropped_frames,
+        },
     }
 
 
@@ -65,11 +90,3 @@ async def detections(websocket: WebSocket) -> None:
             await websocket.receive_text()
     except WebSocketDisconnect:
         hub.disconnect(websocket)
-
-
-@app.post("/api/v1/demo/detection", include_in_schema=False)
-async def demo_detection() -> dict[str, int]:
-    """Deterministic local-only exercise endpoint; remove before authenticated phases."""
-    worker: DetectionWorker = app.state.worker
-    await worker.process(Frame(1280, 720, datetime.now(UTC)))
-    return {"sequence": worker.sequence - 1}

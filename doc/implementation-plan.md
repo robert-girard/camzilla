@@ -1,7 +1,7 @@
 # Camzilla Implementation Plan
 
 Status: Phase 1 in progress
-Last updated: 2026-07-11  
+Last updated: 2026-07-12
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
 ## Document Role and References
@@ -127,15 +127,15 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 #### Inference and detection transport
 
-- [ ] Define `InferenceBackend` lifecycle and detection contracts: load/warm-up, detect, health, close, backend/model metadata, normalized box, class, confidence, source dimensions, timestamps, and timing metrics.
-- [ ] Implement a fake deterministic backend first to validate orchestration and UI independent of ML/hardware.
-- [ ] Implement Ultralytics YOLOv8n CPU inference; select CUDA automatically only when configured and available, with an explicit reported fallback.
-- [ ] Limit MVP classes to `person` by default while keeping filters configurable.
-- [ ] Implement preprocessing with preserved aspect ratio and tested reverse coordinate mapping.
-- [ ] Add configurable sampling and a size-one/bounded latest-frame queue; measure dropped, processed, and failed frames.
+- [x] Define `InferenceBackend` lifecycle and detection contracts: load/warm-up, detect, health, close, backend/model metadata, normalized box, class, confidence, source dimensions, timestamps, and timing metrics.
+- [x] Implement a fake deterministic backend first to validate orchestration and UI independent of ML/hardware.
+- [~] Implement Ultralytics YOLOv8n CPU inference; select CUDA automatically only when configured and available, with an explicit reported fallback. (Adapter and selection logic are present; fixture-backed contract validation remains.)
+- [x] Limit MVP classes to `person` by default while keeping filters configurable.
+- [x] Implement preprocessing with preserved aspect ratio and tested reverse coordinate mapping.
+- [x] Add configurable sampling and a size-one/bounded latest-frame queue; measure dropped, processed, and failed frames.
 - [ ] Consume a local `go2rtc` restream rather than opening a second physical-camera session where supported.
-- [ ] Publish versioned detection messages over WebSocket with heartbeat, reconnect behavior, monotonic sequence, capture/result timestamps, and result age.
-- [ ] Expose redacted health/readiness information for camera, bridge, inference backend/model, WebSocket clients, FPS, and latency.
+- [x] Publish versioned detection messages over WebSocket with heartbeat, reconnect behavior, monotonic sequence, capture/result timestamps, and result age.
+- [~] Expose redacted health/readiness information for camera, bridge, inference backend/model, WebSocket clients, FPS, and latency. (Backend and pipeline counters are present; camera/bridge and rate/latency readiness are pending.)
 
 #### Frontend
 
