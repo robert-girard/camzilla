@@ -120,6 +120,7 @@ export function App() {
         <span>Metadata: {stale ? 'stale' : connection}</span>
         <span>Backend/model: {result ? `${result.backend_id}/${result.model_id}` : '—'}</span>
         <span>Inference: {result ? `${result.inference_ms.toFixed(1)} ms` : '—'}</span>
+        <span>Inference FPS: {result ? result.inference_fps.toFixed(1) : '—'}</span>
         <span>Result age: {age === undefined ? '—' : `${age.toFixed(1)} s`}</span>
       </aside>
     </main>

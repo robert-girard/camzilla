@@ -19,6 +19,7 @@ async def test_fake_backend_matches_contract_and_filter() -> None:
     assert result.detections[0].class_name == "person"
     assert result.source_width == 640
     assert result.sequence == 0
+    assert result.inference_fps >= 0
     assert published == [result]
 
 

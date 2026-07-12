@@ -182,7 +182,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 ### Phase 1 validation evidence
 
-- 2026-07-12: The production-style amd64 API image loaded the checksum-verified YOLOv8n weight on CPU and detected `person` (top confidence 0.87) from a public, temporary fixture; neither weight nor fixture was committed. The backend records CPU fallback when CUDA is unavailable.
+- 2026-07-12: The production-style amd64 API image loaded the checksum-verified YOLOv8n weight on CPU and detected `person` (top confidence 0.87) from a public, temporary fixture; neither weight nor fixture was committed. In the no-camera synthetic pipeline it reported 5.0 inference FPS, 31.0 ms most-recent inference, zero failures, and zero dropped frames. The backend records CPU fallback when CUDA is unavailable.
 - 2026-07-12: The no-camera Compose stack ran with deterministic fake frames. Chromium verified connected detection metadata, an SVG `person` overlay, diagnostics, and the degraded WebRTC state. Real-camera latency/FPS and browser/WebRTC success remain explicit smoke work.
 
 ## Phase 2 — Complete Tripwire and deploy to the Orange Pi (pre-auth)

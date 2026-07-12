@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 const detection = {
   version: 'v1', sequence: 7, capture_timestamp: '2026-07-12T00:00:00.000Z',
   result_timestamp: new Date().toISOString(), source_width: 1280, source_height: 720,
-  backend_id: 'fake', model_id: 'fake-person-v1', inference_ms: 4.5,
+  backend_id: 'fake', model_id: 'fake-person-v1', inference_ms: 4.5, inference_fps: 5,
   detections: [{ class_name: 'person', confidence: 0.91, box: { x: 0.25, y: 0.2, width: 0.5, height: 0.5 } }],
 }
 

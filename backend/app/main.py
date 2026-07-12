@@ -35,7 +35,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     source = (
         OpenCvRestreamSource(settings.inference_restream_url, settings.inference_fps).frames()
         if settings.camera_rtsp_url
-        else SyntheticFrameSource(settings.inference_fps).frames()
+        else SyntheticFrameSource(
+            settings.inference_fps, decoded_image=settings.inference_backend == "ultralytics"
+        ).frames()
     )
     await pipeline.start(source)
     app.state.pipeline = pipeline
@@ -78,6 +80,8 @@ async def ready() -> dict[str, object]:
             "processed_frames": worker.processed_frames,
             "failed_frames": worker.failed_frames,
             "dropped_frames": pipeline.dropped_frames,
+            "inference_fps": worker.inference_fps,
+            "last_inference_ms": worker.last_inference_ms,
         },
         "bridge": {"state": "error" if pipeline.source_error else "ready"},
     }

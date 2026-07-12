@@ -169,6 +169,13 @@ class DetectionWorker:
         self.sequence = 0
         self.processed_frames = 0
         self.failed_frames = 0
+        self.last_inference_ms: float | None = None
+        self._started_at = perf_counter()
+
+    @property
+    def inference_fps(self) -> float:
+        elapsed = perf_counter() - self._started_at
+        return self.processed_frames / elapsed if elapsed > 0 else 0
 
     async def process(self, frame: Frame) -> DetectionMessage:
         started = perf_counter()
@@ -181,6 +188,7 @@ class DetectionWorker:
                 and item.confidence >= self.confidence_threshold
             ]
             health = await self.backend.health()
+            self.processed_frames += 1
             message = DetectionMessage(
                 sequence=self.sequence,
                 capture_timestamp=frame.capture_timestamp,
@@ -190,10 +198,11 @@ class DetectionWorker:
                 backend_id=health.backend_id,
                 model_id=health.model_id,
                 inference_ms=(perf_counter() - started) * 1000,
+                inference_fps=self.inference_fps,
                 detections=filtered,
             )
             self.sequence += 1
-            self.processed_frames += 1
+            self.last_inference_ms = message.inference_ms
             await self.publish(message)
             return message
         except Exception:

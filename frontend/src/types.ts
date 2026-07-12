@@ -14,6 +14,7 @@ export type DetectionMessage = {
   backend_id: string
   model_id: string
   inference_ms: number
+  inference_fps: number
   detections: Detection[]
 }
 

@@ -33,6 +33,7 @@ class DetectionMessage(BaseModel):
     backend_id: str
     model_id: str
     inference_ms: float = Field(ge=0)
+    inference_fps: float = Field(ge=0)
     detections: list[Detection]
 
 

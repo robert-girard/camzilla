@@ -14,14 +14,26 @@ from .queueing import LatestItemQueue, consume_latest
 class SyntheticFrameSource:
     """Deterministic frame clock for local development and integration tests."""
 
-    def __init__(self, fps: float, width: int = 1280, height: int = 720) -> None:
+    def __init__(
+        self, fps: float, width: int = 1280, height: int = 720, decoded_image: bool = False
+    ) -> None:
         self.interval = 1 / fps
         self.width = width
         self.height = height
+        self.decoded_image = decoded_image
 
     async def frames(self) -> AsyncIterator[Frame]:
+        image = None
+        if self.decoded_image:
+            try:
+                import numpy as np
+            except ImportError as error:
+                raise RuntimeError(
+                    "decoded synthetic frames require the Ultralytics runtime extra"
+                ) from error
+            image = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         while True:
-            yield Frame(self.width, self.height, datetime.now(UTC))
+            yield Frame(self.width, self.height, datetime.now(UTC), image)
             await asyncio.sleep(self.interval)
 
 
