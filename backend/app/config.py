@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     discord_delivery_confirmed: bool = False
     stream_down_alerts_enabled: bool = True
     stream_down_repeat_seconds: float = Field(default=3600, ge=60, le=86400)
+    database_url: str = "sqlite+pysqlite:///:memory:"
+    media_root: str = "/media"
+    media_quota_bytes: int = Field(default=5 * 1024 * 1024 * 1024, ge=1024 * 1024)
 
     @field_validator("inference_backend")
     @classmethod

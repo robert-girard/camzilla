@@ -8,6 +8,8 @@ dependencies = [
   "httpx>=0.27,<1",
   "uvicorn[standard]>=0.30,<1",
   "pydantic-settings>=2.6,<3",
+  "sqlalchemy>=2.0,<3",
+  "alembic>=1.14,<2",
 ]
 
 [build-system]

@@ -304,15 +304,15 @@ The system becomes convenient for daily personal use before authentication is in
 
 ### Tasks
 
-- [ ] Implement SQLite persistence through SQLAlchemy 2 with Alembic migrations for the single-node deployment; keep media outside database rows and avoid SQLite database files on network filesystems.
-- [ ] Persist cameras, capability results, the active inference backend/model/target selection, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
-- [ ] Keep the persistence/domain boundary compatible with a later PostgreSQL adapter and document the operational conditions that justify migration (multiple app instances, shared/remote database, or sustained write contention).
+- [~] Implement SQLite persistence through SQLAlchemy 2 with Alembic migrations for the single-node deployment; keep media outside database rows and avoid SQLite database files on network filesystems.
+- [~] Persist cameras, capability results, the active inference backend/model/target selection, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
+- [~] Keep the persistence/domain boundary compatible with a later PostgreSQL adapter and document the operational conditions that justify migration (multiple app instances, shared/remote database, or sustained write contention).
 - [ ] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion.
 - [ ] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
 - [ ] Add pre-roll ring buffering and configurable 5–30 second alert clips with storage quotas and oldest-first retention.
 - [ ] Add manual recording only after retention and disk-full behavior are tested.
 - [ ] Generalize orchestration/UI to multiple cameras while sharing or pooling inference workers based on measured memory/throughput.
-- [ ] Add optimistic config versioning before multiple authenticated editors exist, so Phase 4 does not retrofit it.
+- [~] Add optimistic config versioning before multiple authenticated editors exist, so Phase 4 does not retrofit it.
 - [ ] Add backup/export with secrets excluded by default and explicit restore validation.
 - [ ] Unit/integration-test migrations, rules, zones, schedules, retention, disk-full handling, multi-camera fairness, and backup/restore.
 - [ ] Add Playwright coverage for history filters, rule editing conflicts/validation, zone drawing, clip playback, and multi-camera degraded states.
