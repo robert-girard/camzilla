@@ -222,6 +222,7 @@ class Repository:
         camera_id: str,
         name: str,
         stream_secret_ref: str,
+        catalog_revision: str = "coco-person-v1",
     ) -> int:
         with self.database.session() as session:
             state = session.get(ConfigState, 1)
@@ -238,7 +239,7 @@ class Repository:
                     stream_secret_ref=stream_secret_ref,
                     capabilities={"runtime_state": "pending"},
                     allowed_categories=["coco:person"],
-                    catalog_revision="coco-person-v1",
+                    catalog_revision=catalog_revision,
                 )
             )
             state.version += 1

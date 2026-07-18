@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 3b in progress; Phase 3 complete locally, with remote GitHub Actions confirmation and the attended Phase 2 PTZ/Discord checks still pending
+Status: Phase 3b complete locally; remote GitHub Actions confirmation and the attended Phase 2 PTZ/Discord checks remain pending
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -355,17 +355,19 @@ No new model training, arbitrary label creation, semantic remapping guessed from
 - [x] Reconcile category selections during a Phase 1b model/backend switch by stable semantic ID. Require explicit resolution when the new model lacks a selected category; never silently broaden, drop, or substitute alert targets.
 - [x] Show model changes that would invalidate camera or alert-rule categories before applying the switch, including affected cameras/rules and the available compatible choices.
 - [x] Record the active category catalog revision and selected semantic IDs in events so historical results remain interpretable after model changes.
-- [ ] Unit/integration-test catalog validation, semantic-ID mapping, defaults, multi-select filtering, persistence/migration, invalidation conflicts, alert isolation, and models with different class catalogs.
+- [x] Unit/integration-test catalog validation, semantic-ID mapping, defaults, multi-select filtering, persistence/migration, invalidation conflicts, alert isolation, and models with different class catalogs.
 - [x] Add Playwright coverage for selecting non-person categories, filtering overlays, configuring multi-category alert rules, persistence across restart, and resolving a model-switch incompatibility.
-- [ ] Update backup/export, README configuration guidance, and schema/API compatibility checks for class catalogs and selected categories.
+- [x] Update backup/export, README configuration guidance, and schema/API compatibility checks for class catalogs and selected categories.
 
 ### Exit criteria
 
-- [ ] The UI lists only categories declared by the active model and can persist one or more non-`person` categories per camera and alert rule.
-- [ ] Detection overlays, event records, and alerts consistently honor the selected semantic categories while `person` remains the migration/default behavior.
-- [ ] Switching to a model with a different class catalog cannot silently remove, rename, or reinterpret an existing selection.
-- [ ] Multiple cameras may use different supported category selections without leaking detections or alert rules across cameras.
-- [ ] Backend, migration, frontend, Playwright, backup/export, and compatibility checks pass with deterministic models that expose different class catalogs.
+- [x] The UI lists only categories declared by the active model and can persist one or more non-`person` categories per camera and alert rule.
+- [x] Detection overlays, event records, and alerts consistently honor the selected semantic categories while `person` remains the migration/default behavior.
+- [x] Switching to a model with a different class catalog cannot silently remove, rename, or reinterpret an existing selection.
+- [x] Multiple cameras may use different supported category selections without leaking detections or alert rules across cameras.
+- [x] Backend, migration, frontend, Playwright, backup/export, and compatibility checks pass with deterministic models that expose different class catalogs.
+
+Validation evidence (2026-07-17): 100 backend tests passed with 8 opt-in hardware/runtime skips; Ruff, Mypy, fresh Alembic upgrade/check, schema compatibility, frontend lint/type/unit/build, 21 Playwright flows, repository security checks, both Compose configurations, and production image builds passed. An isolated no-camera production stack switched from `fake-person-v1` to `fake-multi-v1`, persisted `coco:person` plus `coco:car` across forced API recreation, and exported the same selection in a secret-free schema-v2 backup. The isolated containers and volumes were removed after validation.
 
 ## Phase 4 — Keycloak authentication and concurrent administration
 

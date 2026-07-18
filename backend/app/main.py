@@ -140,12 +140,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     repository = Repository(database)
     await asyncio.to_thread(repository.seed, settings.camera_name, active_id)
     active_catalog = catalog_for(backend_health.backend_id, backend_health.model_id)
-    seeded_configuration = await asyncio.to_thread(repository.configuration)
-    if all(
-        set(camera.allowed_categories) <= catalog_category_ids(active_catalog)
-        for camera in seeded_configuration.cameras
-    ):
-        await asyncio.to_thread(repository.ensure_catalog_revision, active_catalog.revision)
     app.state.active_catalog_revision = active_catalog.revision
     app.state.database = database
     app.state.repository = repository
@@ -319,6 +313,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         else:
             selection.transition_state = "degraded"
             selection.transition_error = "persisted inference selection is unavailable"
+    selected_capability = selection.specs[selection.active_capability_id].capability
+    selected_catalog = catalog_for(selected_capability.backend_id, selected_capability.model_id)
+    current_configuration = await asyncio.to_thread(repository.configuration)
+    if all(
+        set(camera.allowed_categories) <= catalog_category_ids(selected_catalog)
+        for camera in current_configuration.cameras
+    ):
+        await asyncio.to_thread(repository.ensure_catalog_revision, selected_catalog.revision)
+    app.state.active_catalog_revision = selected_catalog.revision
     selection.selection_changed = persist_selection
     ptz_service = build_ptz_service(settings)
     app.state.ptz = ptz_service
@@ -504,6 +507,9 @@ async def update_camera_categories(
 @app.post("/api/v1/cameras", response_model=GlobalConfiguration, status_code=201)
 async def add_camera(request: CameraCreate) -> GlobalConfiguration:
     repository: Repository = app.state.repository
+    selection: InferenceSelectionService = app.state.selection
+    active = selection.specs[selection.active_capability_id].capability
+    catalog = catalog_for(active.backend_id, active.model_id)
     try:
         await asyncio.to_thread(
             repository.add_camera,
@@ -511,6 +517,7 @@ async def add_camera(request: CameraCreate) -> GlobalConfiguration:
             camera_id=request.id,
             name=request.name,
             stream_secret_ref=request.stream_secret_ref,
+            catalog_revision=catalog.revision,
         )
     except ConfigurationConflictError as error:
         raise HTTPException(status_code=409, detail="configuration version conflict") from error

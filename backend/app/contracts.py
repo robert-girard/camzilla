@@ -1,5 +1,6 @@
+from copy import deepcopy
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
@@ -50,6 +51,7 @@ class StreamDescriptor(BaseModel):
 
 InferenceTarget = Literal["cpu", "gpu", "npu", "tpu"]
 TransitionState = Literal["ready", "switching", "degraded"]
+SemanticCategoryId = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9_.-]*:[a-z0-9_.:-]+$")]
 
 
 class InferenceCapability(BaseModel):
@@ -332,15 +334,15 @@ class BackupCamera(BaseModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]+$")
     name: str
     enabled: bool
-    allowed_categories: list[str] = Field(min_length=1)
-    catalog_revision: str
+    allowed_categories: list[SemanticCategoryId] = Field(min_length=1)
+    catalog_revision: str = Field(min_length=1, max_length=120)
 
 
 class BackupAlertRule(BaseModel):
     id: str
     camera_id: str
     enabled: bool
-    target_categories: list[str] = Field(min_length=1)
+    target_categories: list[SemanticCategoryId] = Field(min_length=1)
     confidence_threshold: float = Field(ge=0, le=1)
     debounce_seconds: float = Field(ge=1, le=86400)
     schedule_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -357,12 +359,44 @@ class BackupAlertRule(BaseModel):
 
 
 class BackupDocument(BaseModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     exported_at: datetime
     secrets_included: Literal[False] = False
     active_capability_id: str
     cameras: list[BackupCamera] = Field(min_length=1)
     alert_rules: list[BackupAlertRule]
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_person_only_v1(cls, value: object) -> object:
+        if not isinstance(value, dict) or value.get("schema_version") != "1":
+            return value
+        migrated = deepcopy(value)
+        active = str(migrated.get("active_capability_id", ""))
+        parts = active.split(":")
+        revision = (
+            "coco80-v1"
+            if parts and parts[0] == "ultralytics"
+            else "coco-person-v1"
+            if parts[:2] == ["fake", "fake-person-v1"]
+            else None
+        )
+        for camera in migrated.get("cameras", []):
+            if isinstance(camera, dict):
+                camera["allowed_categories"] = [
+                    "coco:person" if item == "person" else item
+                    for item in camera.get("allowed_categories", [])
+                ]
+                if camera.get("catalog_revision") == "person-v1" and revision:
+                    camera["catalog_revision"] = revision
+        for rule in migrated.get("alert_rules", []):
+            if isinstance(rule, dict):
+                rule["target_categories"] = [
+                    "coco:person" if item == "person" else item
+                    for item in rule.get("target_categories", [])
+                ]
+        migrated["schema_version"] = "2"
+        return migrated
 
     @model_validator(mode="after")
     def references_are_consistent(self) -> "BackupDocument":
@@ -374,6 +408,12 @@ class BackupDocument(BaseModel):
             raise ValueError("alert rule identifiers must be unique")
         if any(rule.camera_id not in camera_ids for rule in self.alert_rules):
             raise ValueError("alert rule references an unknown camera")
+        selected_by_camera = {camera.id: set(camera.allowed_categories) for camera in self.cameras}
+        if any(
+            not set(rule.target_categories) <= selected_by_camera[rule.camera_id]
+            for rule in self.alert_rules
+        ):
+            raise ValueError("alert rule category is not enabled for its camera")
         return self
 
 

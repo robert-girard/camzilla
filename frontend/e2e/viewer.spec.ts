@@ -547,7 +547,7 @@ test('validates a secret-free backup before restoring configuration', async ({ p
   )
   await history.getByLabel('Backup file').setInputFiles({
     name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({
-      schema_version: '1', exported_at: new Date().toISOString(), secrets_included: false,
+      schema_version: '2', exported_at: new Date().toISOString(), secrets_included: false,
       active_capability_id: 'fake:yolov8n:cpu',
       cameras: [{
         id: 'front-door', name: 'front-door', enabled: true,

@@ -27,6 +27,7 @@ def test_backup_export_excludes_secrets_capabilities_and_media(repository) -> No
     backup = build_backup(repository.configuration())
     payload = backup.model_dump_json()
     assert backup.secrets_included is False
+    assert backup.schema_version == "2"
     assert "secret_ref" not in payload.lower()
     assert "CAMZILLA_CAMERA_RTSP_URL" not in payload
     assert "capabilities" not in payload
@@ -76,3 +77,39 @@ def test_restore_round_trip_preserves_existing_refs_and_derives_new_refs(reposit
     assert records["side-door"].stream_secret_ref == "env:CAMZILLA_SIDE_DOOR_RTSP_URL"
     with pytest.raises(ConfigurationConflictError):
         repository.restore_backup(document, expected_config_version=version)
+
+
+def test_person_only_v1_backup_migrates_to_semantic_ids_and_active_catalog() -> None:
+    legacy = {
+        "schema_version": "1",
+        "exported_at": "2026-07-17T12:00:00Z",
+        "secrets_included": False,
+        "active_capability_id": "ultralytics:yolo11s:cpu",
+        "cameras": [
+            {
+                "id": "front-door",
+                "name": "Front door",
+                "enabled": True,
+                "allowed_categories": ["person"],
+                "catalog_revision": "person-v1",
+            }
+        ],
+        "alert_rules": [
+            {
+                "id": "person-detected",
+                "camera_id": "front-door",
+                "enabled": True,
+                "target_categories": ["person"],
+                "confidence_threshold": 0.6,
+                "debounce_seconds": 300,
+            }
+        ],
+    }
+
+    migrated = BackupDocument.model_validate(legacy)
+
+    assert migrated.schema_version == "2"
+    assert migrated.cameras[0].allowed_categories == ["coco:person"]
+    assert migrated.cameras[0].catalog_revision == "coco80-v1"
+    assert migrated.alert_rules[0].target_categories == ["coco:person"]
+    assert validate_backup(legacy).valid

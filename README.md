@@ -55,8 +55,9 @@ Choose one available combination and use **Apply inference selection**. Video
 remains independent while the candidate model loads and warms. Detection intake
 pauses, stale results are cleared, and the old backend remains active if the
 switch fails. A successful response updates health, diagnostics, and detection
-metadata with the confirmed model and target. The choice is global and
-runtime-only through Phase 2: restarting the API restores the `.env` default.
+metadata with the confirmed model and target. The choice is global and is
+persisted with the Phase 3 configuration; the `.env` model remains the safe
+bootstrap fallback when no compatible persisted choice can be restored.
 The browser never accepts a model path, remote URL, or arbitrary backend name.
 
 The same allowlisted operation can be inspected or exercised locally through
@@ -75,6 +76,40 @@ If a model is reported as not installed, run
 so startup re-verifies the manifest checksum. An unavailable GPU indicates that
 the server has not verified a CUDA device/runtime; Camzilla does not silently
 downgrade a browser-requested GPU switch to CPU.
+
+### Detection categories
+
+Each installed model exposes a versioned class catalog. The configuration panel
+uses that catalog for searchable per-camera and per-alert-rule selectors;
+`coco:person` is the safe default. Display labels such as `person` and numeric
+model class indices are not persisted as cross-model identity. Use semantic IDs
+for environment defaults, for example:
+
+```sh
+CAMZILLA_ALLOWED_CLASSES=coco:person,coco:car
+CAMZILLA_ALERT_CLASSES=coco:person
+```
+
+A camera filters detection publication, overlays, category metrics, retained
+event media, and alert evaluation to its saved allowlist. Alert-rule targets
+must be a subset of that camera's selection. Before applying a model change,
+the UI previews any semantic IDs missing from the target catalog and names the
+affected cameras and rules. Camzilla does not silently remove, broaden, rename,
+or substitute a category.
+
+The typed category endpoints are:
+
+```sh
+curl --fail http://127.0.0.1:8000/api/v1/cameras/front-door/categories
+curl --fail http://127.0.0.1:8000/api/v1/inference/compatibility/ultralytics:yolo11s:cpu
+```
+
+Saving categories requires the exact returned catalog revision and current
+configuration version. The deterministic `fake-multi-v1` development model
+provides person, car, and dog fixtures so the full selection and conflict flow
+can be tested without a camera or ML runtime. Historical events retain both
+semantic IDs and their catalog revision; if a catalog is no longer installed,
+the UI displays the stable ID instead of guessing a replacement label.
 
 ### Optional PTZ controls
 
@@ -179,11 +214,15 @@ a busy simulated camera can replace only its own stale frame and cannot starve
 a quieter camera. A real second-camera smoke waits for hardware/configuration.
 
 The configuration panel exports a versioned JSON backup and validates a local
-JSON file before enabling restore. Exports contain camera/rule settings and the
-active capability ID, but exclude secret values, secret references, transient
+JSON file before enabling restore. Exports contain camera/rule settings, the
+active capability ID, category catalog revisions, and semantic category IDs,
+but exclude secret values, secret references, transient
 capability probes, events, and media. Restore uses the current optimistic
 configuration version, preserves existing external-secret bindings, and gives
 new cameras derived `env:` references that must be configured separately.
+Current exports use backup schema version 2. Person-only version 1 backups are
+migrated to semantic IDs and the active model's known catalog revision during
+validation; incompatible or unknown catalogs are rejected rather than guessed.
 
 The equivalent export and validation endpoints are
 `GET /api/v1/backup` and `POST /api/v1/backup/validate`. Use the UI for restore

@@ -161,6 +161,37 @@ def test_category_update_validates_revision_ids_rules_and_version() -> None:
     assert empty.status_code == 422
 
 
+def test_cameras_persist_independent_category_allowlists() -> None:
+    with TestClient(app) as client:
+        client.put(
+            "/api/v1/inference/selection",
+            json={"capability_id": "fake:fake-multi-v1:cpu"},
+        )
+        version = client.get("/api/v1/config").json()["version"]
+        created = client.post(
+            "/api/v1/cameras",
+            json={
+                "expected_config_version": version,
+                "id": "side-door",
+                "name": "Side door",
+                "stream_secret_ref": "env:CAMZILLA_SIDE_DOOR_RTSP_URL",
+            },
+        )
+        changed = client.put(
+            "/api/v1/cameras/side-door/categories",
+            json={
+                "expected_config_version": created.json()["version"],
+                "catalog_revision": "coco-person-car-dog-v1",
+                "category_ids": ["coco:person", "coco:dog"],
+            },
+        )
+        front = client.get("/api/v1/cameras/front-door/categories")
+
+    assert changed.status_code == 200
+    assert changed.json()["selected_category_ids"] == ["coco:person", "coco:dog"]
+    assert front.json()["selected_category_ids"] == ["coco:person"]
+
+
 def test_ptz_capability_is_unavailable_until_operation_verified() -> None:
     with TestClient(app) as client:
         response = client.get("/api/v1/cameras/front-door/capabilities/ptz")
@@ -264,6 +295,7 @@ def test_backup_export_validation_and_optimistic_restore_are_secret_free() -> No
         )
     assert exported.status_code == 200
     assert exported.json()["secrets_included"] is False
+    assert exported.json()["schema_version"] == "2"
     assert "secret_ref" not in exported.text.lower()
     assert "CAMZILLA_CAMERA_RTSP_URL" not in exported.text
     assert validation.json() == {"valid": True, "errors": []}

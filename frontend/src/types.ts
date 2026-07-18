@@ -144,7 +144,7 @@ export type EventPage = {
 export type RecordingResponse = { id: string; status: 'recording' | 'processing' }
 
 export type BackupDocument = {
-  schema_version: '1'
+  schema_version: '2'
   exported_at: string
   secrets_included: false
   active_capability_id: string

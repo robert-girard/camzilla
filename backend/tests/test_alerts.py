@@ -217,6 +217,42 @@ def test_alert_rule_applies_overnight_schedule_and_normalized_zone() -> None:
     assert active.queue.qsize() == 1
 
 
+def test_alert_rule_isolates_categories_by_semantic_id() -> None:
+    engine = AlertEngine(
+        AlertRule(
+            id="car-detected",
+            camera_name="front-door",
+            target_classes=frozenset({"coco:car"}),
+        ),
+        DryRunNotifier(),
+        requested_notifier="dry-run",
+        external_delivery_configured=False,
+        configuration_reason=None,
+    )
+    frame = Frame(640, 480, datetime.now(UTC))
+    person = detection_message()
+    car = person.model_copy(
+        update={
+            "detections": [
+                Detection(
+                    class_name="car",
+                    semantic_id="coco:car",
+                    native_class_id=2,
+                    confidence=0.9,
+                    box=NormalizedBox(x=0.2, y=0.2, width=0.3, height=0.5),
+                )
+            ]
+        }
+    )
+
+    engine.observe(frame, person)
+    assert engine.queue.qsize() == 0
+    engine.observe(frame, car)
+    candidate = engine.queue.get_nowait()
+
+    assert candidate.event.matched_classes == {"coco:car"}
+
+
 def test_attachment_contract_rejects_payloads_over_discord_limit() -> None:
     with pytest.raises(ValidationError):
         AlertAttachment(
