@@ -57,8 +57,8 @@ def test_restore_round_trip_preserves_existing_refs_and_derives_new_refs(reposit
             "id": "side-door",
             "name": "Side door",
             "enabled": True,
-            "allowed_categories": ["person"],
-            "catalog_revision": "person-v1",
+            "allowed_categories": ["coco:person"],
+            "catalog_revision": "coco-person-v1",
         }
     )
     changed["alert_rules"][0]["confidence_threshold"] = 0.8

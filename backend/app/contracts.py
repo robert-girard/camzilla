@@ -20,6 +20,8 @@ class NormalizedBox(BaseModel):
 
 class Detection(BaseModel):
     class_name: str
+    semantic_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.:-]+$")
+    native_class_id: int | str
     confidence: float = Field(ge=0, le=1)
     box: NormalizedBox
 
@@ -121,7 +123,7 @@ class PtzMoveResponse(BaseModel):
 class AlertRule(BaseModel):
     id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]+$")
     camera_name: str
-    target_classes: frozenset[str] = frozenset({"person"})
+    target_classes: frozenset[str] = frozenset({"coco:person"})
     confidence_threshold: float = Field(default=0.6, ge=0, le=1)
     debounce_seconds: float = Field(default=300, ge=1, le=86400)
     enabled: bool = True
@@ -246,7 +248,7 @@ class AlertRuleUpdate(BaseModel):
     schedule_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     schedule_end: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     zone: PolygonZone | None = None
-    target_categories: list[str] = Field(default_factory=lambda: ["person"], min_length=1)
+    target_categories: list[str] = Field(default_factory=lambda: ["coco:person"], min_length=1)
 
     @model_validator(mode="after")
     def schedule_is_complete(self) -> "AlertRuleUpdate":
@@ -264,6 +266,7 @@ class EventSummary(BaseModel):
     event_type: str
     triggered_at: datetime
     categories: list[str]
+    catalog_revision: str
     has_snapshot: bool
     has_clip: bool
 
@@ -279,6 +282,50 @@ class EventPage(BaseModel):
 class RecordingResponse(BaseModel):
     id: UUID
     status: Literal["recording", "processing"]
+
+
+class CatalogCategory(BaseModel):
+    semantic_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.:-]+$")
+    native_class_id: int | str
+    display_label: str
+    description: str | None = None
+
+
+class ModelClassCatalog(BaseModel):
+    revision: str
+    backend_id: str
+    model_id: str
+    categories: list[CatalogCategory]
+
+
+class CategorySelectionResponse(BaseModel):
+    camera_id: str
+    config_version: int
+    catalog: ModelClassCatalog
+    selected_category_ids: list[str]
+
+
+class CategorySelectionUpdate(BaseModel):
+    expected_config_version: int = Field(ge=1)
+    catalog_revision: str
+    category_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def categories_are_unique(self) -> "CategorySelectionUpdate":
+        if len(self.category_ids) != len(set(self.category_ids)):
+            raise ValueError("category identifiers must be unique")
+        return self
+
+
+class CategoryCompatibilityResponse(BaseModel):
+    capability_id: str
+    catalog_revision: str
+    compatible: bool
+    retained_category_ids: list[str]
+    missing_category_ids: list[str]
+    affected_camera_ids: list[str]
+    affected_rule_ids: list[str]
+    available_category_ids: list[str]
 
 
 class BackupCamera(BaseModel):

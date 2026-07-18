@@ -21,7 +21,7 @@ async def test_pipeline_drops_superseded_frames_when_inference_is_slow() -> None
 
     backend = SlowFake()
     await backend.load()
-    worker = DetectionWorker(backend, frozenset({"person"}), 0.5, publish)
+    worker = DetectionWorker(backend, frozenset({"coco:person"}), 0.5, publish)
     pipeline = InferencePipeline(worker, source_dropped_frames=lambda: 2)
 
     async def source():
@@ -44,7 +44,7 @@ async def test_source_failure_is_redacted_and_pipeline_closes_cleanly() -> None:
 
     backend = FakeInferenceBackend()
     await backend.load()
-    worker = DetectionWorker(backend, frozenset({"person"}), 0.5, publish)
+    worker = DetectionWorker(backend, frozenset({"coco:person"}), 0.5, publish)
     pipeline = InferencePipeline(worker)
 
     async def broken_source():
@@ -114,7 +114,7 @@ async def test_inference_failure_does_not_terminate_pipeline_consumer() -> None:
 
     backend = FailOnceBackend()
     await backend.load()
-    worker = DetectionWorker(backend, frozenset({"person"}), 0.5, publish)
+    worker = DetectionWorker(backend, frozenset({"coco:person"}), 0.5, publish)
     pipeline = InferencePipeline(worker)
 
     async def source():

@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 
 from .alerts import AlertEngine, build_alert_engine
 from .backup import build_backup, validate_backup
+from .catalog import catalog_category_ids, catalog_for
 from .config import Settings, get_settings
 from .contracts import (
     AlertPayload,
@@ -24,10 +25,14 @@ from .contracts import (
     BackupValidationRequest,
     BackupValidationResponse,
     CameraCreate,
+    CategoryCompatibilityResponse,
+    CategorySelectionResponse,
+    CategorySelectionUpdate,
     EventPage,
     GlobalConfiguration,
     InferenceCapabilitiesResponse,
     InferenceSelectionRequest,
+    ModelClassCatalog,
     PtzCapabilityResponse,
     PtzMoveRequest,
     PtzMoveResponse,
@@ -81,6 +86,37 @@ def backend_for_capability(spec: CapabilitySpec) -> InferenceBackend:
     raise RuntimeError("unsupported inference capability")
 
 
+def category_compatibility(
+    configuration: GlobalConfiguration,
+    capability_id: str,
+    catalog: ModelClassCatalog,
+) -> CategoryCompatibilityResponse:
+    available = catalog_category_ids(catalog)
+    affected_cameras = [
+        camera.id
+        for camera in configuration.cameras
+        if not set(camera.allowed_categories) <= available
+    ]
+    affected_rules = [
+        rule.id
+        for rule in configuration.alert_rules
+        if not set(rule.target_categories) <= available
+    ]
+    selected = {
+        category for camera in configuration.cameras for category in camera.allowed_categories
+    } | {category for rule in configuration.alert_rules for category in rule.target_categories}
+    return CategoryCompatibilityResponse(
+        capability_id=capability_id,
+        catalog_revision=catalog.revision,
+        compatible=not affected_cameras and not affected_rules,
+        retained_category_ids=sorted(selected & available),
+        missing_category_ids=sorted(selected - available),
+        affected_camera_ids=affected_cameras,
+        affected_rule_ids=affected_rules,
+        available_category_ids=sorted(available),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -103,6 +139,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(database.migrate)
     repository = Repository(database)
     await asyncio.to_thread(repository.seed, settings.camera_name, active_id)
+    active_catalog = catalog_for(backend_health.backend_id, backend_health.model_id)
+    seeded_configuration = await asyncio.to_thread(repository.configuration)
+    if all(
+        set(camera.allowed_categories) <= catalog_category_ids(active_catalog)
+        for camera in seeded_configuration.cameras
+    ):
+        await asyncio.to_thread(repository.ensure_catalog_revision, active_catalog.revision)
+    app.state.active_catalog_revision = active_catalog.revision
     app.state.database = database
     app.state.repository = repository
     app.state.media_failures = 0
@@ -156,6 +200,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             event_type=event_type,
             triggered_at=payload.event.triggered_at,
             categories=sorted(payload.event.matched_classes),
+            catalog_revision=app.state.active_catalog_revision,
             snapshot_path=snapshot_path,
         )
         if event_type == "detection" and clip_recorder is not None:
@@ -169,6 +214,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         frame_observer=clip_recorder.observe if clip_recorder else None,
     )
     persisted_configuration = await asyncio.to_thread(repository.configuration)
+    primary_camera = next(
+        item for item in persisted_configuration.cameras if item.id == settings.camera_name
+    )
     persisted_rule = next(
         item for item in persisted_configuration.alert_rules if item.id == "person-detected"
     )
@@ -191,7 +239,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.alert_engine = alert_engine
     app.state.worker = DetectionWorker(
         backend,
-        settings.class_filter,
+        frozenset(primary_camera.allowed_categories),
         settings.confidence_threshold,
         hub.publish,
         alert_engine.observe,
@@ -235,7 +283,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     async def persist_selection(selected_id: str) -> None:
-        await asyncio.to_thread(repository.set_active_capability, selected_id)
+        selected = specs[selected_id].capability
+        catalog = catalog_for(selected.backend_id, selected.model_id)
+        await asyncio.to_thread(repository.set_active_capability, selected_id, catalog.revision)
+        app.state.active_catalog_revision = catalog.revision
+
+    async def validate_selection(spec: CapabilitySpec) -> None:
+        current = await asyncio.to_thread(repository.configuration)
+        catalog = catalog_for(spec.capability.backend_id, spec.capability.model_id)
+        compatibility = category_compatibility(current, spec.capability.id, catalog)
+        if not compatibility.compatible:
+            raise SelectionError(
+                "conflict",
+                "model switch would invalidate categories for "
+                f"{len(compatibility.affected_camera_ids)} camera(s) and "
+                f"{len(compatibility.affected_rule_ids)} alert rule(s)",
+            )
 
     selection = InferenceSelectionService(
         specs,
@@ -245,6 +308,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pipeline,
         hub,
         backend_for_capability,
+        selection_preflight=validate_selection,
     )
     app.state.selection = selection
     persisted_id = await asyncio.to_thread(repository.active_capability_id)
@@ -354,6 +418,7 @@ async def ready() -> dict[str, object]:
             "source_reconnects": pipeline.source_reconnects,
             "inference_fps": worker.inference_fps,
             "last_inference_ms": worker.last_inference_ms,
+            "published_detections_by_category": worker.published_detections,
         },
         "bridge": {"state": source_state},
     }
@@ -369,6 +434,71 @@ async def alert_status() -> AlertRuntimeStatus:
 async def configuration() -> GlobalConfiguration:
     repository: Repository = app.state.repository
     return await asyncio.to_thread(repository.configuration)
+
+
+@app.get(
+    "/api/v1/cameras/{camera_id}/categories",
+    response_model=CategorySelectionResponse,
+)
+async def camera_categories(camera_id: str) -> CategorySelectionResponse:
+    repository: Repository = app.state.repository
+    current = await asyncio.to_thread(repository.configuration)
+    camera = next((item for item in current.cameras if item.id == camera_id), None)
+    if camera is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+    selection: InferenceSelectionService = app.state.selection
+    active = selection.specs[selection.active_capability_id].capability
+    return CategorySelectionResponse(
+        camera_id=camera.id,
+        config_version=current.version,
+        catalog=catalog_for(active.backend_id, active.model_id),
+        selected_category_ids=camera.allowed_categories,
+    )
+
+
+@app.put(
+    "/api/v1/cameras/{camera_id}/categories",
+    response_model=CategorySelectionResponse,
+)
+async def update_camera_categories(
+    camera_id: str, request: CategorySelectionUpdate
+) -> CategorySelectionResponse:
+    selection: InferenceSelectionService = app.state.selection
+    active = selection.specs[selection.active_capability_id].capability
+    catalog = catalog_for(active.backend_id, active.model_id)
+    if request.catalog_revision != catalog.revision:
+        raise HTTPException(status_code=409, detail="category catalog revision conflict")
+    if not set(request.category_ids) <= catalog_category_ids(catalog):
+        raise HTTPException(status_code=422, detail="category is not declared by active model")
+    repository: Repository = app.state.repository
+    try:
+        await asyncio.to_thread(
+            repository.update_camera_categories,
+            camera_id,
+            expected_config_version=request.expected_config_version,
+            catalog_revision=catalog.revision,
+            category_ids=request.category_ids,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="camera not found") from error
+    except ConfigurationConflictError as error:
+        raise HTTPException(status_code=409, detail="configuration version conflict") from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="category change would invalidate an alert rule; update the rule first",
+        ) from error
+    settings = get_settings()
+    if camera_id == settings.camera_name:
+        selection.worker.allowed_classes = frozenset(request.category_ids)
+    current = await asyncio.to_thread(repository.configuration)
+    camera = next(item for item in current.cameras if item.id == camera_id)
+    return CategorySelectionResponse(
+        camera_id=camera.id,
+        config_version=current.version,
+        catalog=catalog,
+        selected_category_ids=camera.allowed_categories,
+    )
 
 
 @app.post("/api/v1/cameras", response_model=GlobalConfiguration, status_code=201)
@@ -407,6 +537,14 @@ async def restore_backup(request: BackupRestoreRequest) -> GlobalConfiguration:
     spec = selection.specs.get(request.document.active_capability_id)
     if spec is None or not spec.capability.available:
         raise HTTPException(status_code=422, detail="backup inference selection is unavailable")
+    backup_catalog = catalog_for(spec.capability.backend_id, spec.capability.model_id)
+    available_categories = catalog_category_ids(backup_catalog)
+    if any(
+        camera.catalog_revision != backup_catalog.revision
+        or not set(camera.allowed_categories) <= available_categories
+        for camera in request.document.cameras
+    ):
+        raise HTTPException(status_code=422, detail="backup category catalog is incompatible")
     camera_categories = {
         camera.id: set(camera.allowed_categories) for camera in request.document.cameras
     }
@@ -431,7 +569,12 @@ async def restore_backup(request: BackupRestoreRequest) -> GlobalConfiguration:
             await selection.select(request.document.active_capability_id)
         finally:
             selection.selection_changed = callback
+    app.state.active_catalog_revision = backup_catalog.revision
     restored = await asyncio.to_thread(repository.configuration)
+    settings = get_settings()
+    primary = next((item for item in restored.cameras if item.id == settings.camera_name), None)
+    if primary:
+        selection.worker.allowed_classes = frozenset(primary.allowed_categories)
     restored_rule = next((item for item in restored.alert_rules if item.enabled), None)
     if restored_rule:
         alert_engine: AlertEngine = app.state.alert_engine
@@ -575,6 +718,7 @@ async def start_manual_recording(camera_name: str) -> RecordingResponse:
         event_type="manual-recording",
         triggered_at=datetime.now(UTC),
         categories=[],
+        catalog_revision=app.state.active_catalog_revision,
     )
     return RecordingResponse(id=event_id, status="recording")
 
@@ -596,6 +740,22 @@ async def inference_capabilities() -> InferenceCapabilitiesResponse:
     return selection.response()
 
 
+@app.get(
+    "/api/v1/inference/compatibility/{capability_id}",
+    response_model=CategoryCompatibilityResponse,
+)
+async def inference_category_compatibility(
+    capability_id: str,
+) -> CategoryCompatibilityResponse:
+    selection: InferenceSelectionService = app.state.selection
+    spec = selection.specs.get(capability_id)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="inference capability not found")
+    current = await asyncio.to_thread(app.state.repository.configuration)
+    catalog = catalog_for(spec.capability.backend_id, spec.capability.model_id)
+    return category_compatibility(current, capability_id, catalog)
+
+
 @app.put("/api/v1/inference/selection", response_model=InferenceCapabilitiesResponse)
 async def select_inference(
     request: InferenceSelectionRequest,
@@ -605,7 +765,11 @@ async def select_inference(
         return await selection.select(request.capability_id)
     except SelectionError as error:
         status_code = (
-            404 if error.kind == "not_found" else 409 if error.kind == "unavailable" else 503
+            404
+            if error.kind == "not_found"
+            else 409
+            if error.kind in {"unavailable", "conflict"}
+            else 503
         )
         raise HTTPException(status_code=status_code, detail=error.public_message) from error
 

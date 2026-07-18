@@ -68,7 +68,7 @@ async def make_service(
     initial = TrackingBackend("initial")
     await initial.load()
     hub = DetectionHub()
-    worker = DetectionWorker(initial, frozenset({"person"}), 0.5, hub.publish)
+    worker = DetectionWorker(initial, frozenset({"coco:person"}), 0.5, hub.publish)
     pipeline = InferencePipeline(worker)
     specs = {
         capability_id("fake", model_id, "cpu"): available_spec(model_id)

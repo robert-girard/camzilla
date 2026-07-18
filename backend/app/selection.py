@@ -48,16 +48,17 @@ def build_capability_specs(
 ) -> dict[str, CapabilitySpec]:
     specs: dict[str, CapabilitySpec] = {}
     if include_fake:
-        fake = InferenceCapability(
-            id=capability_id("fake", "fake-person-v1", "cpu"),
-            backend_id="fake",
-            model_id="fake-person-v1",
-            target="cpu",
-            device="synthetic",
-            compatible=True,
-            available=True,
-        )
-        specs[fake.id] = CapabilitySpec(fake, requested_device="synthetic")
+        for model_id in ("fake-person-v1", "fake-multi-v1"):
+            fake = InferenceCapability(
+                id=capability_id("fake", model_id, "cpu"),
+                backend_id="fake",
+                model_id=model_id,
+                target="cpu",
+                device="synthetic",
+                compatible=True,
+                available=True,
+            )
+            specs[fake.id] = CapabilitySpec(fake, requested_device="synthetic")
 
     for model_id in sorted(SUPPORTED_MODEL_IDS):
         artifact = registry.artifact_status(model_id)
@@ -112,6 +113,7 @@ def build_capability_specs(
 
 BackendFactory = Callable[[CapabilitySpec], InferenceBackend]
 SelectionChanged = Callable[[str], Awaitable[None]]
+SelectionPreflight = Callable[[CapabilitySpec], Awaitable[None]]
 
 
 class InferenceSelectionService:
@@ -125,6 +127,7 @@ class InferenceSelectionService:
         hub: DetectionHub,
         backend_factory: BackendFactory,
         selection_changed: SelectionChanged | None = None,
+        selection_preflight: SelectionPreflight | None = None,
     ) -> None:
         if active_capability_id not in specs:
             raise RuntimeError("active inference capability is not registered")
@@ -136,6 +139,7 @@ class InferenceSelectionService:
         self.hub = hub
         self.backend_factory = backend_factory
         self.selection_changed = selection_changed
+        self.selection_preflight = selection_preflight
         self.transition_state: TransitionState = "ready"
         self.transition_error: str | None = None
         self._switch_lock = asyncio.Lock()
@@ -173,6 +177,8 @@ class InferenceSelectionService:
                 self.transition_state = "ready"
                 self.transition_error = None
                 return self.response()
+            if self.selection_preflight:
+                await self.selection_preflight(spec)
 
             self.transition_state = "switching"
             self.transition_error = None

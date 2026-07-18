@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol
 
+from .catalog import semantic_id
 from .contracts import Detection, DetectionMessage, InferenceTarget, NormalizedBox
 
 
@@ -69,13 +70,35 @@ class FakeInferenceBackend:
             raise RuntimeError("inference backend is not loaded")
         if frame.width < 2 or frame.height < 2:
             return []
-        return [
+        detections = [
             Detection(
                 class_name="person",
+                semantic_id="coco:person",
+                native_class_id=0,
                 confidence=0.91,
                 box=NormalizedBox(x=0.25, y=0.15, width=0.25, height=0.60),
             )
         ]
+        if self.model_id == "fake-multi-v1":
+            detections.extend(
+                [
+                    Detection(
+                        class_name="car",
+                        semantic_id="coco:car",
+                        native_class_id=1,
+                        confidence=0.87,
+                        box=NormalizedBox(x=0.55, y=0.55, width=0.30, height=0.20),
+                    ),
+                    Detection(
+                        class_name="dog",
+                        semantic_id="coco:dog",
+                        native_class_id=2,
+                        confidence=0.82,
+                        box=NormalizedBox(x=0.08, y=0.65, width=0.18, height=0.20),
+                    ),
+                ]
+            )
+        return detections
 
     async def health(self) -> BackendHealth:
         return BackendHealth(self.backend_id, self.model_id, self._loaded, self.device, self.target)
@@ -138,6 +161,8 @@ class UltralyticsBackend:
             detections.append(
                 Detection(
                     class_name=str(names[class_id]),
+                    semantic_id=semantic_id(str(names[class_id])),
+                    native_class_id=class_id,
                     confidence=float(box.conf[0].item()),
                     box=NormalizedBox(
                         x=max(0, x1) / frame.width,
@@ -183,6 +208,7 @@ class DetectionWorker:
         self.processed_frames = 0
         self.failed_frames = 0
         self.observer_failures = 0
+        self.published_detections: dict[str, int] = {}
         self.last_inference_ms: float | None = None
         self._started_at = perf_counter()
         self._process_lock = asyncio.Lock()
@@ -200,10 +226,14 @@ class DetectionWorker:
                 filtered = [
                     item
                     for item in detections
-                    if item.class_name in self.allowed_classes
+                    if item.semantic_id in self.allowed_classes
                     and item.confidence >= self.confidence_threshold
                 ]
                 health = await self.backend.health()
+                for detection in filtered:
+                    self.published_detections[detection.semantic_id] = (
+                        self.published_detections.get(detection.semantic_id, 0) + 1
+                    )
                 self.processed_frames += 1
                 message = DetectionMessage(
                     sequence=self.sequence,
@@ -241,6 +271,7 @@ class DetectionWorker:
             self.processed_frames = 0
             self.failed_frames = 0
             self.observer_failures = 0
+            self.published_detections = {}
             self.last_inference_ms = None
             self._started_at = perf_counter()
             return previous

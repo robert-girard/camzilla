@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .catalog import normalize_semantic_id
+
 SUPPORTED_MODEL_IDS = frozenset({"yolov8n", "yolov8s", "yolov8m", "yolo11n", "yolo11s", "yolo11m"})
 
 
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
     model_manifest_path: str | None = None
     inference_fps: float = Field(default=5.0, gt=0, le=60)
     confidence_threshold: float = Field(default=0.5, ge=0, le=1)
-    allowed_classes: str = "person"
+    allowed_classes: str = "coco:person"
     result_ttl_seconds: float = Field(default=2.0, gt=0)
     ptz_enabled: bool = False
     ptz_verified: bool = False
@@ -32,7 +34,7 @@ class Settings(BaseSettings):
     onvif_password: str | None = None
     onvif_profile: str = "PROFILE_000"
     alerts_enabled: bool = True
-    alert_classes: str = "person"
+    alert_classes: str = "coco:person"
     alert_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
     alert_debounce_seconds: float = Field(default=300, ge=1, le=86400)
     notifier: str = "dry-run"
@@ -113,11 +115,19 @@ class Settings(BaseSettings):
 
     @property
     def class_filter(self) -> frozenset[str]:
-        return frozenset(item.strip() for item in self.allowed_classes.split(",") if item.strip())
+        return frozenset(
+            normalize_semantic_id(item.strip())
+            for item in self.allowed_classes.split(",")
+            if item.strip()
+        )
 
     @property
     def alert_class_filter(self) -> frozenset[str]:
-        return frozenset(item.strip() for item in self.alert_classes.split(",") if item.strip())
+        return frozenset(
+            normalize_semantic_id(item.strip())
+            for item in self.alert_classes.split(",")
+            if item.strip()
+        )
 
     @property
     def ptz_configuration_complete(self) -> bool:

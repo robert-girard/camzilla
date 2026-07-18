@@ -65,7 +65,9 @@ class CameraRecord(Base):
     stream_secret_ref: Mapped[str] = mapped_column(String(160), nullable=False)
     capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     allowed_categories: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    catalog_revision: Mapped[str] = mapped_column(String(120), nullable=False, default="person-v1")
+    catalog_revision: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="coco-person-v1"
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
@@ -97,6 +99,7 @@ class EventRecord(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     categories: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    catalog_revision: Mapped[str] = mapped_column(String(120), nullable=False, default="legacy-v1")
     snapshot_path: Mapped[str | None] = mapped_column(String(240), nullable=True)
     clip_path: Mapped[str | None] = mapped_column(String(240), nullable=True)
 
@@ -157,7 +160,8 @@ class Repository:
                         id=camera_name,
                         name=camera_name,
                         stream_secret_ref="env:CAMZILLA_CAMERA_RTSP_URL",
-                        allowed_categories=["person"],
+                        allowed_categories=["coco:person"],
+                        catalog_revision="coco-person-v1",
                     )
                 )
             if session.get(AlertRuleRecord, "person-detected") is None:
@@ -165,7 +169,7 @@ class Repository:
                     AlertRuleRecord(
                         id="person-detected",
                         camera_id=camera_name,
-                        target_categories=["person"],
+                        target_categories=["coco:person"],
                     )
                 )
 
@@ -176,13 +180,31 @@ class Repository:
                 raise RuntimeError("configuration is not initialized")
             return state.active_capability_id
 
-    def set_active_capability(self, capability_id: str) -> None:
+    def set_active_capability(self, capability_id: str, catalog_revision: str) -> None:
         with self.database.session() as session:
             state = session.get(ConfigState, 1)
             if state is None:
                 raise RuntimeError("configuration is not initialized")
             state.active_capability_id = capability_id
+            for camera in session.scalars(select(CameraRecord).where(CameraRecord.enabled)):
+                camera.catalog_revision = catalog_revision
+                camera.version += 1
             state.version += 1
+
+    def ensure_catalog_revision(self, catalog_revision: str) -> None:
+        """Record the runtime catalog revision after a compatible startup migration."""
+        with self.database.session() as session:
+            state = session.get(ConfigState, 1)
+            if state is None:
+                raise RuntimeError("configuration is not initialized")
+            changed = False
+            for camera in session.scalars(select(CameraRecord).where(CameraRecord.enabled)):
+                if camera.catalog_revision != catalog_revision:
+                    camera.catalog_revision = catalog_revision
+                    camera.version += 1
+                    changed = True
+            if changed:
+                state.version += 1
 
     def set_camera_capabilities(self, camera_id: str, capabilities: dict[str, Any]) -> None:
         with self.database.session() as session:
@@ -215,7 +237,8 @@ class Repository:
                     name=name,
                     stream_secret_ref=stream_secret_ref,
                     capabilities={"runtime_state": "pending"},
-                    allowed_categories=["person"],
+                    allowed_categories=["coco:person"],
+                    catalog_revision="coco-person-v1",
                 )
             )
             state.version += 1
@@ -370,6 +393,33 @@ class Repository:
             state.version += 1
             return state.version
 
+    def update_camera_categories(
+        self,
+        camera_id: str,
+        *,
+        expected_config_version: int,
+        catalog_revision: str,
+        category_ids: list[str],
+    ) -> int:
+        with self.database.session() as session:
+            state = session.get(ConfigState, 1)
+            camera = session.get(CameraRecord, camera_id)
+            if state is None or camera is None:
+                raise KeyError(camera_id)
+            if state.version != expected_config_version:
+                raise ConfigurationConflictError("configuration version conflict")
+            rules = session.scalars(
+                select(AlertRuleRecord).where(AlertRuleRecord.camera_id == camera_id)
+            )
+            enabled = set(category_ids)
+            if any(not set(rule.target_categories) <= enabled for rule in rules):
+                raise ValueError("camera category selection would invalidate an alert rule")
+            camera.allowed_categories = category_ids
+            camera.catalog_revision = catalog_revision
+            camera.version += 1
+            state.version += 1
+            return state.version
+
     def record_event(
         self,
         *,
@@ -379,6 +429,7 @@ class Repository:
         event_type: str,
         triggered_at: datetime,
         categories: list[str],
+        catalog_revision: str = "legacy-v1",
         snapshot_path: str | None = None,
         clip_path: str | None = None,
     ) -> None:
@@ -393,6 +444,7 @@ class Repository:
                     event_type=event_type,
                     triggered_at=triggered_at,
                     categories=categories,
+                    catalog_revision=catalog_revision,
                     snapshot_path=snapshot_path,
                     clip_path=clip_path,
                 )
@@ -434,6 +486,7 @@ class Repository:
                         event_type=record.event_type,
                         triggered_at=record.triggered_at,
                         categories=record.categories,
+                        catalog_revision=record.catalog_revision,
                         has_snapshot=record.snapshot_path is not None,
                         has_clip=record.clip_path is not None,
                     )

@@ -33,13 +33,13 @@ def test_migration_creates_expected_schema_and_secret_references(repository) -> 
     assert camera is not None
     assert camera.stream_secret_ref == "env:CAMZILLA_CAMERA_RTSP_URL"
     assert "://" not in camera.stream_secret_ref
-    assert camera.allowed_categories == ["person"]
-    assert rule is not None and rule.target_categories == ["person"]
+    assert camera.allowed_categories == ["coco:person"]
+    assert rule is not None and rule.target_categories == ["coco:person"]
 
 
 def test_active_selection_and_optimistic_rule_update_survive_sessions(repository) -> None:
     assert repository.active_capability_id() == "fake:fake-person-v1:cpu"
-    repository.set_active_capability("ultralytics:yolo11s:cpu")
+    repository.set_active_capability("ultralytics:yolo11s:cpu", "coco80-v1")
     version = repository.configuration_version()
     next_version = repository.update_rule(
         "person-detected",
@@ -49,7 +49,7 @@ def test_active_selection_and_optimistic_rule_update_survive_sessions(repository
         schedule_start="22:00",
         schedule_end="06:00",
         zone=[[0.1, 0.1], [0.9, 0.1], [0.9, 0.9]],
-        target_categories=["person"],
+        target_categories=["coco:person"],
     )
 
     assert repository.active_capability_id() == "ultralytics:yolo11s:cpu"
@@ -63,7 +63,7 @@ def test_active_selection_and_optimistic_rule_update_survive_sessions(repository
             schedule_start=None,
             schedule_end=None,
             zone=None,
-            target_categories=["person"],
+            target_categories=["coco:person"],
         )
 
 
@@ -93,13 +93,15 @@ def test_event_metadata_persists_without_media_blobs(repository) -> None:
         rule_id="person-detected",
         event_type="detection",
         triggered_at=datetime.now(UTC),
-        categories=["person"],
+        categories=["coco:person"],
+        catalog_revision="coco-person-v1",
         snapshot_path="front-door/example.jpg",
     )
     with repository.database.session() as session:
         event = session.get(EventRecord, event_id)
     assert event is not None
-    assert event.categories == ["person"]
+    assert event.categories == ["coco:person"]
+    assert event.catalog_revision == "coco-person-v1"
     assert event.snapshot_path == "front-door/example.jpg"
     columns = {item["name"] for item in inspect(repository.database.engine).get_columns("events")}
     assert "data" not in columns

@@ -39,6 +39,8 @@ def test_fake_pipeline_delivers_versioned_detection_over_websocket() -> None:
     assert message["version"] == "v1"
     assert message["sequence"] >= 0
     assert message["detections"][0]["class_name"] == "person"
+    assert message["detections"][0]["semantic_id"] == "coco:person"
+    assert message["detections"][0]["native_class_id"] == 0
     assert message["target"] == "cpu"
     assert message["device"] == "synthetic"
 
@@ -73,6 +75,90 @@ def test_inference_selection_rejects_unknown_and_unavailable_ids() -> None:
     assert missing.json() == {"detail": "inference capability not found"}
     assert unavailable.status_code == 409
     assert unavailable.json() == {"detail": "inference capability is unavailable"}
+
+
+def test_category_catalog_selection_and_model_switch_conflict_are_explicit() -> None:
+    multi_id = "fake:fake-multi-v1:cpu"
+    person_id = "fake:fake-person-v1:cpu"
+    with TestClient(app) as client:
+        switched = client.put("/api/v1/inference/selection", json={"capability_id": multi_id})
+        initial = client.get("/api/v1/cameras/front-door/categories")
+        changed = client.put(
+            "/api/v1/cameras/front-door/categories",
+            json={
+                "expected_config_version": initial.json()["config_version"],
+                "catalog_revision": "coco-person-car-dog-v1",
+                "category_ids": ["coco:person", "coco:car"],
+            },
+        )
+        configuration = client.get("/api/v1/config").json()
+        rule = client.put(
+            "/api/v1/alert-rules/person-detected",
+            json={
+                "expected_config_version": configuration["version"],
+                "confidence_threshold": 0.6,
+                "debounce_seconds": 300,
+                "target_categories": ["coco:person", "coco:car"],
+            },
+        )
+        compatibility = client.get(f"/api/v1/inference/compatibility/{person_id}")
+        blocked = client.put("/api/v1/inference/selection", json={"capability_id": person_id})
+        active = client.get("/api/v1/inference")
+
+    assert switched.status_code == 200
+    assert [item["semantic_id"] for item in initial.json()["catalog"]["categories"]] == [
+        "coco:person",
+        "coco:car",
+        "coco:dog",
+    ]
+    assert changed.status_code == 200
+    assert changed.json()["selected_category_ids"] == ["coco:person", "coco:car"]
+    assert rule.status_code == 200
+    assert compatibility.json() == {
+        "capability_id": person_id,
+        "catalog_revision": "coco-person-v1",
+        "compatible": False,
+        "retained_category_ids": ["coco:person"],
+        "missing_category_ids": ["coco:car"],
+        "affected_camera_ids": ["front-door"],
+        "affected_rule_ids": ["person-detected"],
+        "available_category_ids": ["coco:person"],
+    }
+    assert blocked.status_code == 409
+    assert "invalidate categories" in blocked.json()["detail"]
+    assert active.json()["active"]["capability_id"] == multi_id
+
+
+def test_category_update_validates_revision_ids_rules_and_version() -> None:
+    with TestClient(app) as client:
+        current = client.get("/api/v1/cameras/front-door/categories").json()
+        stale_revision = client.put(
+            "/api/v1/cameras/front-door/categories",
+            json={
+                "expected_config_version": current["config_version"],
+                "catalog_revision": "removed-catalog-v1",
+                "category_ids": ["coco:person"],
+            },
+        )
+        unknown = client.put(
+            "/api/v1/cameras/front-door/categories",
+            json={
+                "expected_config_version": current["config_version"],
+                "catalog_revision": current["catalog"]["revision"],
+                "category_ids": ["custom:parcel"],
+            },
+        )
+        empty = client.put(
+            "/api/v1/cameras/front-door/categories",
+            json={
+                "expected_config_version": current["config_version"],
+                "catalog_revision": current["catalog"]["revision"],
+                "category_ids": [],
+            },
+        )
+    assert stale_revision.status_code == 409
+    assert unknown.status_code == 422
+    assert empty.status_code == 422
 
 
 def test_ptz_capability_is_unavailable_until_operation_verified() -> None:
@@ -110,7 +196,7 @@ def test_persisted_configuration_updates_optimistically_without_secret_values() 
             "schedule_start": "22:00",
             "schedule_end": "06:00",
             "zone": {"points": [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}, {"x": 0.5, "y": 0.9}]},
-            "target_categories": ["person"],
+            "target_categories": ["coco:person"],
         }
         changed = client.put("/api/v1/alert-rules/person-detected", json=update)
         conflict = client.put("/api/v1/alert-rules/person-detected", json=update)
@@ -200,7 +286,7 @@ def test_rule_update_rejects_invalid_zone_schedule_and_disabled_category() -> No
                 "zone": {
                     "points": [{"x": 0.1, "y": 0.1}, {"x": 0.2, "y": 0.2}, {"x": 0.3, "y": 0.3}]
                 },
-                "target_categories": ["person"],
+                "target_categories": ["coco:person"],
             },
         )
         partial_schedule = client.put(
@@ -210,7 +296,7 @@ def test_rule_update_rejects_invalid_zone_schedule_and_disabled_category() -> No
                 "confidence_threshold": 0.6,
                 "debounce_seconds": 60,
                 "schedule_start": "22:00",
-                "target_categories": ["person"],
+                "target_categories": ["coco:person"],
             },
         )
         disabled_category = client.put(
@@ -239,7 +325,7 @@ def test_event_history_paginates_filters_sorts_and_deletes() -> None:
             rule_id="person-detected",
             event_type="detection",
             triggered_at=now - timedelta(minutes=2),
-            categories=["person"],
+            categories=["coco:person"],
         )
         repository.record_event(
             event_id=event_ids[1],
@@ -255,7 +341,7 @@ def test_event_history_paginates_filters_sorts_and_deletes() -> None:
             rule_id="person-detected",
             event_type="detection",
             triggered_at=now,
-            categories=["person"],
+            categories=["coco:person"],
         )
         page = client.get("/api/v1/events?page=1&page_size=1&event_type=detection&sort=desc")
         category = client.get("/api/v1/events?category=stream-down")
@@ -308,7 +394,7 @@ def test_enabled_media_serves_deletes_and_gates_manual_recording(monkeypatch, tm
             rule_id="person-detected",
             event_type="detection",
             triggered_at=datetime.now(UTC),
-            categories=["person"],
+            categories=["coco:person"],
             snapshot_path=stored.path,
         )
         snapshot = client.get(f"/api/v1/events/{event_id}/snapshot")

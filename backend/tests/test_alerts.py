@@ -46,6 +46,8 @@ def detection_message(sequence: int = 1, confidence: float = 0.91) -> DetectionM
         detections=[
             Detection(
                 class_name="person",
+                semantic_id="coco:person",
+                native_class_id=0,
                 confidence=confidence,
                 box=NormalizedBox(x=0.2, y=0.2, width=0.3, height=0.5),
             )
@@ -262,7 +264,7 @@ async def test_snapshot_renderer_annotates_a_copy_and_enforces_limit(monkeypatch
     attachment = await renderer.render(
         Frame(640, 480, datetime.now(UTC), Image()),
         detection_message(),
-        frozenset({"person"}),
+        frozenset({"coco:person"}),
     )
 
     assert attachment is not None and attachment.data == b"jpeg"
@@ -273,7 +275,7 @@ async def test_snapshot_renderer_annotates_a_copy_and_enforces_limit(monkeypatch
         await SnapshotRenderer(max_bytes=4).render(
             Frame(640, 480, datetime.now(UTC), Image()),
             detection_message(),
-            frozenset({"person"}),
+            frozenset({"coco:person"}),
         )
 
 
@@ -284,7 +286,7 @@ def payload() -> AlertPayload:
             camera_name="front-door",
             triggered_at=datetime.now(UTC),
             detection_sequence=1,
-            matched_classes=frozenset({"person"}),
+            matched_classes=frozenset({"coco:person"}),
         ),
         text="Camzilla detected person",
         attachments=[AlertAttachment(filename="alert.jpg", mime_type="image/jpeg", data=b"x")],

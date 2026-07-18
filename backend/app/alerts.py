@@ -157,7 +157,7 @@ class SnapshotRenderer:
             image = cv2.resize(image, (round(width * scale), round(height * scale)))
             height, width = image.shape[:2]
         for detection in message.detections:
-            if detection.class_name not in target_classes:
+            if detection.semantic_id not in target_classes:
                 continue
             box = detection.box
             start = (round(box.x * width), round(box.y * height))
@@ -253,7 +253,7 @@ class AlertEngine:
         matched = [
             item
             for item in message.detections
-            if item.class_name in self.rule.target_classes
+            if item.semantic_id in self.rule.target_classes
             and item.confidence >= self.rule.confidence_threshold
             and self._inside_zone(
                 item.box.x + item.box.width / 2,
@@ -284,7 +284,7 @@ class AlertEngine:
                 camera_name=self.rule.camera_name,
                 triggered_at=self.wall_clock(),
                 detection_sequence=message.sequence,
-                matched_classes=frozenset(item.class_name for item in matched),
+                matched_classes=frozenset(item.semantic_id for item in matched),
             ),
         )
         try:
