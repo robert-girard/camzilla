@@ -34,3 +34,26 @@ async def test_pipeline_drops_superseded_frames_when_inference_is_slow() -> None
     assert pipeline.dropped_frames >= 3
     assert worker.processed_frames < 5
     assert messages
+
+
+@pytest.mark.asyncio
+async def test_source_failure_is_redacted_and_pipeline_closes_cleanly() -> None:
+    async def publish(_message):
+        return None
+
+    backend = FakeInferenceBackend()
+    await backend.load()
+    worker = DetectionWorker(backend, frozenset({"person"}), 0.5, publish)
+    pipeline = InferencePipeline(worker)
+
+    async def broken_source():
+        if False:
+            yield Frame(640, 480, datetime.now(UTC))
+        raise RuntimeError("private camera source details")
+
+    await pipeline.start(broken_source())
+    await asyncio.sleep(0)
+    assert pipeline.source_error == "RuntimeError"
+    await pipeline.close()
+    assert pipeline._producer is not None and pipeline._producer.done()
+    assert pipeline._consumer is not None and pipeline._consumer.done()

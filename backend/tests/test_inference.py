@@ -35,6 +35,24 @@ async def test_confidence_filter_removes_fake_detection() -> None:
     assert result.detections == []
 
 
+@pytest.mark.asyncio
+async def test_inference_failure_is_counted_without_publishing() -> None:
+    published = []
+
+    class BrokenFake(FakeInferenceBackend):
+        async def detect(self, frame):
+            raise RuntimeError("synthetic failure")
+
+    backend = BrokenFake()
+    await backend.load()
+    worker = DetectionWorker(backend, frozenset({"person"}), 0.5, published.append)
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        await worker.process(Frame(640, 480, datetime.now(UTC)))
+    assert worker.failed_frames == 1
+    assert worker.processed_frames == 0
+    assert published == []
+
+
 def test_cuda_selection_reports_an_explicit_cpu_fallback() -> None:
     assert select_inference_device("cuda", False) == (
         "cpu",

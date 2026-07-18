@@ -15,11 +15,12 @@ multi-camera operation, and authentication begin in later phases.
 
 ## Configuration and security
 
-Copy `.env.example` to an ignored `.env` and set `CAMZILLA_CAMERA_RTSP_URL`.
-Never commit it. `CAMZILLA_BIND_HOST` defaults to `127.0.0.1`; use `0.0.0.0`
-only on a trusted LAN. Phase 1 has no authentication, so LAN exposure permits
-any network peer to use the viewer. The `go2rtc` administrative API is internal
-only, and camera URLs are not returned by the API.
+No `.env` is required for the synthetic fake development mode. To use a physical
+camera, copy `.env.example` to an ignored `.env`, replace its neutral camera URL,
+and never commit it. `CAMZILLA_BIND_HOST` defaults to `127.0.0.1`; use `0.0.0.0`
+only on a trusted LAN. Phase 1 has no authentication, so LAN exposure permits any
+network peer to use the viewer. The `go2rtc` administrative API is internal only,
+and camera URLs are not returned by the API.
 
 For real YOLO inference, choose `yolov8n`, `yolov8s`, `yolov8m`, `yolo11n`,
 `yolo11s`, or `yolo11m`. Nano is fastest and medium is the most resource-heavy;
@@ -61,11 +62,13 @@ CAMZILLA_INFERENCE_RESTREAM_URL=rtsp://127.0.0.1:8554/front-door \
 uv run --extra ultralytics pytest tests/test_live_camera_smoke.py
 ```
 
-Check configuration without printing values:
+Check synthetic-development configuration, or explicitly require the physical
+camera variables, without printing values:
 
 ```sh
 cd backend
 uv run python -m app.cli
+uv run --env-file ../.env python -m app.cli --camera
 ```
 
 ## Development
@@ -73,13 +76,20 @@ uv run python -m app.cli
 Start the live-reload stack (Vite HMR and FastAPI reload):
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.dev.yaml up --build
+docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-Ordinary edits under `frontend/` and `backend/app/` synchronize without a
-rebuild. Rebuild after Dockerfile, dependency/lockfile, native dependency, or
-model-manifest changes. Target logs with `docker compose logs -f api`,
-`frontend`, or `go2rtc`; stop with `docker compose down`.
+This clean-clone command starts synthetic frames and deterministic fake person
+detections. If `.env` exists, Compose loads the configured camera and inference
+settings automatically. Ordinary edits under `frontend/` and `backend/app/`
+synchronize without a rebuild. Rebuild after a Dockerfile, dependency/lockfile,
+native dependency, or model-manifest change. Target one service with, for example,
+`docker compose -f compose.yaml -f compose.dev.yaml logs -f api` (or `frontend`
+or `go2rtc`). Stop with:
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml down
+```
 
 ## Production-like x86 startup
 
@@ -105,6 +115,10 @@ These commands are CI-safe and use no camera or secret:
 (cd frontend && npm ci && npm run lint && npm run typecheck && npm test && npm run build)
 (cd frontend && npx playwright install chromium && npm run test:e2e)
 docker compose config
+docker compose -f compose.yaml -f compose.dev.yaml up --build -d --wait
+curl --fail http://127.0.0.1:8000/health/ready
+curl --fail http://127.0.0.1:5173/
+docker compose -f compose.yaml -f compose.dev.yaml down
 ```
 
 Live-camera, CUDA, and eventual RKNN checks are opt-in hardware smoke tests;

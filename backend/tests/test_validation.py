@@ -6,12 +6,25 @@ from app.validation import missing_configuration
 
 
 def test_validation_reports_name_not_secret() -> None:
-    assert missing_configuration(Settings()) == ["CAMZILLA_CAMERA_RTSP_URL"]
+    assert missing_configuration(Settings(), require_camera=True) == ["CAMZILLA_CAMERA_RTSP_URL"]
+
+
+def test_validation_accepts_no_camera_for_synthetic_development() -> None:
+    assert missing_configuration(Settings()) == []
+
+
+def test_blank_camera_url_uses_synthetic_development() -> None:
+    assert Settings(camera_rtsp_url="").camera_rtsp_url is None
 
 
 def test_validation_accepts_camera_url_without_exposing_it() -> None:
     settings = Settings(camera_rtsp_url="rtsp://camera.local/stream")
-    assert missing_configuration(settings) == []
+    assert missing_configuration(settings, require_camera=True) == []
+
+
+def test_validation_reports_missing_managed_weight_by_variable_name(tmp_path) -> None:
+    settings = Settings(inference_backend="ultralytics", model_path=str(tmp_path / "missing.pt"))
+    assert missing_configuration(settings) == ["CAMZILLA_MODEL_PATH"]
 
 
 @pytest.mark.parametrize(

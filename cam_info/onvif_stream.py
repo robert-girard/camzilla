@@ -4,11 +4,10 @@ import base64
 import hashlib
 import os
 import socket
-import subprocess
 import sys
 import time
-import uuid
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import requests
@@ -24,6 +23,17 @@ WSU = (
     "http://docs.oasis-open.org/wss/2004/01/"
     "oasis-200401-wss-wssecurity-utility-1.0.xsd"
 )
+
+
+@dataclass(frozen=True)
+class MediaProfile:
+    token: str
+    name: str
+    encoding: str | None
+    width: str | None
+    height: str | None
+    frame_rate: str | None
+    bitrate_kbps: str | None
 
 
 def load_env_file(path=None):
@@ -133,6 +143,12 @@ def node_text(root, name):
     return None
 
 
+def child_text(root, name):
+    if root is None:
+        return None
+    return node_text(root, name)
+
+
 def get_profiles(media_url, username, password):
     root = post_soap(
         media_url,
@@ -145,7 +161,25 @@ def get_profiles(media_url, username, password):
         token = profile.attrib.get("token")
         name = node_text(profile, "Name") or token
         if token:
-            profiles.append((token, name))
+            configurations = find_all(profile, "VideoEncoderConfiguration")
+            configuration = configurations[0] if configurations else None
+            resolutions = find_all(configuration, "Resolution") if configuration is not None else []
+            rate_controls = (
+                find_all(configuration, "RateControl") if configuration is not None else []
+            )
+            resolution = resolutions[0] if resolutions else None
+            rate_control = rate_controls[0] if rate_controls else None
+            profiles.append(
+                MediaProfile(
+                    token=token,
+                    name=name,
+                    encoding=child_text(configuration, "Encoding"),
+                    width=child_text(resolution, "Width"),
+                    height=child_text(resolution, "Height"),
+                    frame_rate=child_text(rate_control, "FrameRateLimit"),
+                    bitrate_kbps=child_text(rate_control, "BitrateLimit"),
+                )
+            )
     return profiles
 
 
@@ -164,49 +198,52 @@ def get_stream_uri(media_url, username, password, profile_token):
     return node_text(root, "Uri")
 
 
-def play(uri):
-    print(f"Launching GStreamer for {uri}", flush=True)
-    subprocess.run(["gst-launch-1.0", "playbin", f"uri={uri}"], check=False)
-
-
 def main():
     load_env_file()
 
-    parser = argparse.ArgumentParser(description="Fetch an RTSP URL from an ONVIF camera.")
+    parser = argparse.ArgumentParser(description="Report sanitized ONVIF media profiles.")
     parser.add_argument("--host", default=os.getenv("CAMERA_HOST", ""))
     parser.add_argument("--port", type=int, default=int(os.getenv("ONVIF_PORT", "8000")))
     parser.add_argument("--media-path", default="/onvif/Media")
     parser.add_argument("--user", default=os.getenv("ONVIF_USER", ""))
     parser.add_argument("--password", default=os.getenv("ONVIF_PASSWORD", ""))
     parser.add_argument("--wait", type=int, default=60)
-    parser.add_argument("--play", action="store_true")
     args = parser.parse_args()
 
     if not args.host:
         parser.error("CAMERA_HOST must be set in .env or passed with --host")
 
     if not wait_for_port(args.host, args.port, args.wait):
-        print(f"Timed out waiting for {args.host}:{args.port} to open.", file=sys.stderr)
+        print("Timed out waiting for the configured ONVIF endpoint.", file=sys.stderr)
         return 2
 
     media_url = f"http://{args.host}:{args.port}{args.media_path}"
-    print(f"Using ONVIF media endpoint: {media_url}")
-    profiles = get_profiles(media_url, args.user, args.password)
+    try:
+        profiles = get_profiles(media_url, args.user, args.password)
+    except (requests.RequestException, ET.ParseError):
+        print("ONVIF profile query failed; endpoint and credentials are redacted.", file=sys.stderr)
+        return 1
     if not profiles:
         print("No ONVIF media profiles returned.", file=sys.stderr)
         return 1
 
-    for token, name in profiles:
-        print(f"Profile: {name} ({token})")
-
-    uri = get_stream_uri(media_url, args.user, args.password, profiles[0][0])
-    if not uri:
-        print("No RTSP URI returned.", file=sys.stderr)
-        return 1
-
-    print(f"RTSP URI: {uri}")
-    if args.play:
-        play(uri)
+    print("Configured ONVIF media endpoint is reachable.")
+    for profile in profiles:
+        try:
+            uri = get_stream_uri(media_url, args.user, args.password, profile.token)
+        except (requests.RequestException, ET.ParseError):
+            uri = None
+        resolution = (
+            f"{profile.width}x{profile.height}"
+            if profile.width is not None and profile.height is not None
+            else "unknown"
+        )
+        print(
+            f"Profile {profile.token}: encoding={profile.encoding or 'unknown'} "
+            f"resolution={resolution} fps={profile.frame_rate or 'unknown'} "
+            f"bitrate_kbps={profile.bitrate_kbps or 'unknown'} "
+            f"rtsp_uri={'available' if uri else 'unavailable'}"
+        )
     return 0
 
 

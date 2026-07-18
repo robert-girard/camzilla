@@ -8,4 +8,7 @@ main { max-width: 1100px; margin: auto; padding: 1rem; }
 .box { fill: transparent; stroke: #22c55e; stroke-width: 4; }
 .label { fill: #f8fafc; font-size: 22px; paint-order: stroke; stroke: #111827; stroke-width: 6px; }
 .video-placeholder { display: grid; place-items: center; margin: 0; color: #cbd5e1; text-align: center; }
+.fullscreen { position: absolute; right: .75rem; top: .75rem; z-index: 2; padding: .45rem .7rem; border: 1px solid #94a3b8; border-radius: .35rem; background: rgb(15 23 42 / 85%); color: #f8fafc; cursor: pointer; }
+.fullscreen:focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
+.viewer:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
 .diagnostics { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .75rem; color: #cbd5e1; font-size: .875rem; }

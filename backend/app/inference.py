@@ -26,6 +26,7 @@ class BackendHealth:
     model_id: str
     ready: bool
     device: str
+    fallback_reason: str | None = None
 
 
 class InferenceBackend(Protocol):
@@ -146,6 +147,7 @@ class UltralyticsBackend:
             self.model_id,
             self._model is not None,
             self.selected_device,
+            self.fallback_reason,
         )
 
     async def close(self) -> None:

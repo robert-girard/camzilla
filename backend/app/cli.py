@@ -1,9 +1,16 @@
+import argparse
+
 from .config import get_settings
 from .validation import missing_configuration
 
 
 def main() -> int:
-    missing = missing_configuration(get_settings())
+    parser = argparse.ArgumentParser(description="Validate Camzilla configuration without values.")
+    parser.add_argument(
+        "--camera", action="store_true", help="require physical-camera configuration"
+    )
+    args = parser.parse_args()
+    missing = missing_configuration(get_settings(), require_camera=args.camera)
     if missing:
         print("Missing configuration: " + ", ".join(missing))
         return 1

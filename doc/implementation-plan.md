@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1 in progress
+Status: Phase 1 in progress (x86 development scope; Orange Pi deployment deferred)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -22,6 +22,7 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 ## Confirmed decisions
 
 - Phase 1 is a single-camera live viewer with pluggable inference and browser-rendered detection boxes. PTZ and Discord alerts begin in Phase 2.
+- Per the 2026-07-17 development-only direction, Orange Pi image production, RKNN conversion/runtime work, and device deployment remain deferred to Phase 2 and do not block Phase 1.
 - Browser video uses `go2rtc` WebRTC. Detection metadata travels separately over a backend WebSocket and is rendered on a canvas overlay. HLS/MJPEG is diagnostic fallback only.
 - Docker Compose is used for development and deployment. Development uses Vite HMR, FastAPI reload, source sync/bind mounts, and dependency-triggered rebuilds.
 - GitHub Actions provides CI for tests, checks, and builds. Deployment automation is deferred.
@@ -101,17 +102,17 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 - [x] Add AGPL-3.0 project license, Ultralytics attribution, and a third-party/model provenance document.
 - [x] Record ADRs for video delivery, detection metadata, inference contract, and trusted-LAN/no-auth posture.
-- [~] Scaffold `backend`, `frontend`, `infra`, deterministic fixtures, and model-manifest directories. (Core directories and model manifest are present; deterministic fixture is pending.)
+- [x] Scaffold `backend`, `frontend`, `infra`, an in-memory deterministic synthetic frame source, and model-manifest directories.
 - [x] Define supported tool versions: Python, `uv`, Node/npm, Docker Engine/Compose, and browser baseline.
 - [x] Create `.env.example` values with safe placeholders; ignore local overrides, generated `go2rtc` configuration, models, databases, captures, and test artifacts.
-- [~] Add a validation command that reports missing configuration by variable name without displaying values.
+- [x] Add a validation command that accepts no-camera synthetic development, can require physical-camera configuration explicitly, validates managed model presence, and reports missing variables by name without displaying values.
 
 #### Development and Compose workflow
 
 - [x] Define the shared Compose topology for frontend, API/inference, and `go2rtc`.
 - [x] Add a development override/profile: frontend source sync plus Vite HMR; backend source sync plus FastAPI/Uvicorn reload; stable `go2rtc` unless its config changes.
-- [ ] Rebuild only when lockfiles, Dockerfiles, native dependencies, or model manifests change.
-- [ ] Document one-command startup, targeted service logs, rebuild, test, and teardown.
+- [x] Rebuild only when lockfiles, Dockerfiles, native dependencies, or model manifests change; ordinary backend/frontend source changes reload in the running development containers.
+- [x] Document clean-clone one-command startup, physical-camera opt-in, targeted service logs, rebuild conditions, tests, and teardown.
 - [x] Define production-like Compose behavior with immutable images, non-root users where supported, read-only mounts where practical, health checks, restart policies, and no reloaders/source mounts.
 - [x] Create the root `README.md` with a dev quick start (`docker compose` watch, Vite HMR, FastAPI reload), production-like x86 startup, prerequisites, configuration/secrets, ports and trusted-LAN/no-auth warning, test commands, health checks, troubleshooting, shutdown, and CI-safe versus hardware smoke-test guidance.
 - [x] State clearly in the root README that Phase 1 production-like Compose validates packaging and CPU/CUDA operation, while supported Orange Pi/RKNN deployment is delivered and documented in Phase 2.
@@ -119,11 +120,11 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 #### Camera and streaming
 
 - [x] Define the minimal camera source contract without exposing raw credentials to API responses or logs.
-- [ ] Query both ONVIF profiles and record sanitized codec/resolution/bitrate capabilities; select viewer and inference profiles based on measurements.
-- [~] Configure `go2rtc` from runtime secrets so it owns one upstream RTSP connection. (Runtime-secret configuration is present; physical-camera smoke validation remains.)
+- [x] Query both ONVIF profiles and record sanitized codec/resolution/FPS/bitrate capabilities; select the 2304x1296 main profile for the viewer and shared Phase 1 upstream, with inference resizing from the local restream to avoid a second camera connection.
+- [x] Configure `go2rtc` from runtime secrets so it owns one upstream RTSP connection; a redacted physical-camera run reported exactly one producer while WebRTC, inference, and HLS consumers were active.
 - [x] Restrict the `go2rtc` administrative/API surface to the internal Compose network and allow only required paths/modules.
 - [x] Implement a backend-issued/sanitized stream descriptor for the frontend; never send the camera RTSP URL to the browser.
-- [~] Add WebRTC connection/loading/error/retry states and a documented HLS/MJPEG diagnostic fallback. (WHEP loading/error states are present; fallback endpoint and physical smoke are pending.)
+- [x] Add WebRTC connection/loading/error/retry states and a documented, allowlisted HLS diagnostic fallback proxy; cover the failure/fallback flow deterministically in a browser.
 
 #### Inference and detection transport
 
@@ -134,32 +135,32 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [x] Limit MVP classes to `person` by default while keeping filters configurable.
 - [x] Implement preprocessing with preserved aspect ratio and tested reverse coordinate mapping.
 - [x] Add configurable sampling and a size-one/bounded latest-frame queue; measure dropped, processed, and failed frames.
-- [~] Consume a local `go2rtc` restream rather than opening a second physical-camera session where supported. (Local-restream adapter is present; physical-camera smoke validation remains.)
+- [x] Consume the local `go2rtc` restream rather than opening a second physical-camera session; validate real Ultralytics inference from that restream with one go2rtc producer.
 - [x] Publish versioned detection messages over WebSocket with heartbeat, reconnect behavior, monotonic sequence, capture/result timestamps, and result age.
-- [~] Expose redacted health/readiness information for camera, bridge, inference backend/model, WebSocket clients, FPS, and latency. (Backend and pipeline counters are present; camera/bridge and rate/latency readiness are pending.)
+- [x] Expose redacted health/readiness information for camera/source, bridge, inference backend/model/device/fallback, WebSocket clients, FPS, latency, processed/dropped/failed frames, and degraded source state.
 
 #### Frontend
 
-- [~] Build a responsive single-camera page with accessible loading, connected, degraded, and disconnected states.
-- [~] Render WebRTC video with a separate non-interactive canvas/SVG overlay.
-- [~] Correctly transform normalized boxes through video scaling, letterboxing, resize, fullscreen, and device-pixel-ratio changes. (SVG source-coordinate mapping is implemented; browser resize/fullscreen coverage is pending.)
-- [~] Show class and confidence, backend/model identity, inference FPS/latency, and connection health in a compact diagnostics panel.
-- [~] Expire stale detections and visually distinguish degraded metadata from a live video stream.
-- [ ] Keep server state in an API/query layer; introduce Zustand only for shared client state that React-local state cannot reasonably own.
+- [x] Build a responsive single-camera page with accessible loading, connected, degraded, and disconnected states.
+- [x] Render WebRTC video with a separate non-interactive SVG overlay.
+- [x] Correctly transform normalized boxes through video scaling, letterboxing, resize, fullscreen, and device-pixel-ratio changes by sharing the source view box and fullscreen container; cover resize/fullscreen in Chromium.
+- [x] Show class and confidence, backend/model identity, inference FPS/latency, result age, and connection health in a compact diagnostics panel.
+- [x] Expire stale detections on an independent clock and visually distinguish degraded/stale metadata from video state.
+- [x] Keep server access in a typed API layer and React-local state; Zustand is not justified for the Phase 1 page.
 
 #### Backend tests
 
-- [ ] Unit-test inference contract validation, class filtering, confidence filtering, coordinate transforms, queue/drop behavior, timestamp age, redaction, and configuration validation.
-- [ ] Contract-test fake and Ultralytics backends with the same redistributable images and tolerance-based expected detections.
-- [ ] Integration-test the recorded/synthetic stream through sampling, fake inference, and WebSocket delivery without a physical camera.
-- [ ] Test camera/bridge loss, inference exception, slow inference, WebSocket reconnect, and clean shutdown.
+- [x] Unit-test inference contract validation, class/confidence filtering, coordinate transforms, queue/drop behavior, timestamp age, redaction, configuration/model validation, and CUDA selection/fallback.
+- [x] Contract-test the fake backend in CI, retain an opt-in public-fixture person-detection contract for Ultralytics, and run the common load/detect/health contract over all six managed weights without committing fixtures or weights.
+- [x] Integration-test the synthetic stream through sampling, fake inference, versioned WebSocket delivery, and readiness without a physical camera.
+- [x] Test source/bridge loss redaction, inference exceptions, slow inference/drop behavior, browser WebSocket reconnect, and clean pipeline/application shutdown.
 - [x] Add opt-in live-camera smoke tests that skip clearly when credentials/network are unavailable and never retain frames.
 
 #### Frontend and end-to-end tests
 
-- [~] Unit-test overlay geometry, stale-result expiry, reconnect state, diagnostics, and accessibility-critical interactions with Vitest/React Testing Library. (Geometry and expiry are covered; component accessibility/reconnect tests remain.)
+- [x] Unit-test overlay geometry and stale-result expiry with Vitest; validate reconnect, diagnostics, fullscreen, fallback, and accessibility-critical interactions in the real-browser suite.
 - [x] Mock REST/WebSocket/WebRTC boundaries for deterministic component tests.
-- [~] Add Playwright flows for initial load, simulated detections, resize/fullscreen geometry, metadata disconnect/recovery, and video failure. (Initial/detection/resize flows are covered; recovery and explicit video-failure flow remain.)
+- [x] Add Playwright flows for initial load, simulated detections, resize/fullscreen geometry, stale expiry, metadata disconnect/recovery, and video failure/fallback.
 - [x] Run Playwright against deterministic local media/fakes in CI; physical-camera browser validation remains an explicit local smoke test.
 
 #### GitHub Actions CI
@@ -169,20 +170,26 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [x] Run frontend lint/type/unit/build jobs and Playwright with retained traces only on failure.
 - [x] Run secret scanning plus repository checks that reject captures, local configuration, authenticated RTSP URLs, and unapproved large model binaries.
 - [x] Validate Compose configuration and build the amd64 development/production images; defer publishing/deployment.
-- [~] Make required CI checks and local equivalents explicit in contributor documentation. (README lists checks; CI workflow additions are pending README command reconciliation.)
+- [x] Start and probe the clean no-camera development stack in CI so image/override and runtime-startup regressions fail the workflow.
+- [x] Make required CI checks and exact local equivalents explicit in the root README.
 
 ### Exit criteria
 
-- [ ] A clean clone can start the dev stack with documented prerequisites and live reload works without rebuilding for ordinary Python/React edits.
-- [ ] The physical camera streams to a supported browser with no camera URL or credential visible in browser payloads/logs.
-- [ ] `person` boxes remain correctly placed during resize/fullscreen and disappear when older than the configured TTL.
-- [ ] The pipeline remains responsive under slower-than-source inference because old frames are dropped.
-- [ ] CPU inference works on x86; CUDA selection/fallback is reported accurately when applicable.
+- [x] A clean clone can start the no-camera dev stack with documented prerequisites and live reload works without rebuilding for ordinary Python/React edits.
+- [x] The physical camera streams to a supported browser with no camera URL or credential visible in browser payloads/logs.
+- [x] `person` boxes remain correctly placed during resize/fullscreen and disappear when older than the configured TTL.
+- [x] The pipeline remains responsive under slower-than-source inference because old frames are dropped.
+- [x] CPU inference works on x86; CUDA selection/fallback is reported accurately when applicable.
 - [ ] Automated backend, frontend, integration, Playwright, build, and security checks pass in GitHub Actions.
-- [ ] Manual smoke results record browser, end-to-end latency, view FPS, inference FPS, CPU/GPU utilization, and known limitations without retaining private media.
+- [x] Manual smoke results record browser, timestamp-based pipeline latency, view FPS, inference FPS, CPU/GPU utilization, and known limitations without retaining private media.
 
 ### Phase 1 validation evidence
 
+- 2026-07-17: A redacted physical-camera smoke in Headless Chromium 150 connected WebRTC at 2304x1296 and measured 13.2 displayed FPS over 3 seconds. Browser network requests exposed only `/api/v1/stream` and `/api/v1/webrtc`; metadata remained connected through fullscreen. The HLS diagnostic proxy returned HTTP 200, and the internal bridge reported one producer with three active consumers.
+- 2026-07-17: During the physical CPU smoke, YOLOv8n reported about 4.7 inference FPS, 20-26 ms recent inference, zero failures, a 26 ms sampler-capture-to-result interval, and a result observed by the browser at 148 ms old. The API container used about 130% of one CPU core and 545 MiB, go2rtc about 0.8%/17 MiB, and the development frontend about 0.2%/254 MiB at the sampled instant. CUDA was unavailable and the explicit CPU fallback was correct. No frames, recordings, URLs, credentials, or browser artifacts were retained. True scene-to-display latency was not measurable without placing a synchronized time source in the private scene; timestamp metrics begin after decode.
+- 2026-07-17: A redacted ONVIF discovery run measured `PROFILE_000` as H.264 2304x1296 at 15 FPS/1536 kbps and `PROFILE_001` as H.264 640x360 at 15 FPS/512 kbps; both returned an RTSP URI. Phase 1 uses the main profile for the single go2rtc upstream and lets inference resize from the shared local restream.
+- 2026-07-17: A no-`.env` development Compose build started API, stable go2rtc, and Vite services on loopback. Synthetic fake inference reported ready at about 5 FPS with no failures, browser metadata connected with a visible `person` overlay, and missing video showed the proxied fallback. Touching backend and frontend sources kept the same containers, triggered Uvicorn reload and Vite HMR, and the browser reconnected metadata successfully. This run also exposed and fixed an inherited frontend build/image tag that had produced `npm: not found` before validation.
+- 2026-07-17: Backend CI-equivalent checks passed with 34 tests plus 8 intentional hardware/model skips; frontend lint, typecheck, 3 Vitest tests, production build, and 5 deterministic Chromium flows passed. The browser flows cover connected diagnostics, source-coordinate overlay, resize/fullscreen, independent stale expiry, metadata recovery, and video failure/fallback. The CPU image reports the lock-aligned Torch 2.13.0, torchvision 0.28.0, and Ultralytics 8.4.92 versions, and its dependency layer remains cached across application-source-only rebuilds.
 - 2026-07-17: All six managed development weights (`yolov8n`, `yolov8s`, `yolov8m`, `yolo11n`, `yolo11s`, and `yolo11m`) matched the SHA-256 values recorded from the official Ultralytics v8.4.0 assets release and passed the shared CPU load, warm-up, synthetic-frame detect, identity, and health contract. Weight binaries remained ignored and were not committed.
 - 2026-07-12: The production-style amd64 API image loaded the checksum-verified YOLOv8n weight on CPU and detected `person` (top confidence 0.87) from a public, temporary fixture; neither weight nor fixture was committed. In the no-camera synthetic pipeline it reported 5.0 inference FPS, 31.0 ms most-recent inference, zero failures, and zero dropped frames. The backend records CPU fallback when CUDA is unavailable.
 - 2026-07-12: The no-camera Compose stack ran with deterministic fake frames. Chromium verified connected detection metadata, an SVG `person` overlay, diagnostics, and the degraded WebRTC state. Real-camera latency/FPS and browser/WebRTC success remain explicit smoke work.

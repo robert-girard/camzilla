@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { exchangeWebRtcOffer, getStreamDescriptor } from './api'
 import { isStale, sourceRect } from './overlay'
 import type { DetectionMessage, StreamDescriptor } from './types'
 
@@ -20,20 +21,41 @@ export function App() {
   const [videoState, setVideoState] = useState<VideoState>('loading')
   const [now, setNow] = useState(Date.now())
   const videoRef = useRef<HTMLVideoElement>(null)
+  const viewerRef = useRef<HTMLElement>(null)
+  const [fullscreen, setFullscreen] = useState(false)
 
   useEffect(() => {
-    let retry: number | undefined
+    let metadataRetry: number | undefined
+    let videoRetry: number | undefined
+    let descriptorRetry: number | undefined
     let socket: WebSocket | undefined
     let peer: RTCPeerConnection | undefined
     let stopped = false
 
+    const scheduleVideoRetry = (descriptor: StreamDescriptor) => {
+      if (stopped || videoRetry) return
+      setVideoState('degraded')
+      peer?.close()
+      videoRetry = window.setTimeout(() => {
+        videoRetry = undefined
+        void connectVideo(descriptor)
+      }, 1_000)
+    }
+
     const connectVideo = async (descriptor: StreamDescriptor) => {
       try {
+        peer?.close()
         peer = new RTCPeerConnection()
         peer.addTransceiver('video', { direction: 'recvonly' })
         peer.ontrack = ({ streams }) => {
           if (videoRef.current) videoRef.current.srcObject = streams[0]
           setVideoState('connected')
+        }
+        peer.onconnectionstatechange = () => {
+          if (peer?.connectionState === 'connected') setVideoState('connected')
+          if (peer?.connectionState === 'disconnected' || peer?.connectionState === 'failed') {
+            scheduleVideoRetry(descriptor)
+          }
         }
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
@@ -44,22 +66,24 @@ export function App() {
           }, { once: true })
           window.setTimeout(resolve, 1_000)
         })
-        const answer = await fetch(descriptor.webrtc_path, {
-          method: 'POST',
-          headers: { 'content-type': 'application/sdp' },
-          body: peer.localDescription?.sdp,
-        })
-        if (!answer.ok) throw new Error('WHEP offer rejected')
-        await peer.setRemoteDescription({ type: 'answer', sdp: await answer.text() })
+        const answer = await exchangeWebRtcOffer(descriptor.webrtc_path, peer.localDescription?.sdp ?? '')
+        await peer.setRemoteDescription({ type: 'answer', sdp: answer })
       } catch {
-        if (!stopped) setVideoState('degraded')
+        scheduleVideoRetry(descriptor)
       }
     }
 
-    void fetch('/api/v1/stream')
-      .then((response) => response.ok ? response.json() as Promise<StreamDescriptor> : Promise.reject())
-      .then((descriptor) => { setStream(descriptor); return connectVideo(descriptor) })
-      .catch(() => setVideoState('degraded'))
+    const loadVideo = () => {
+      void getStreamDescriptor()
+        .then((descriptor) => { setStream(descriptor); return connectVideo(descriptor) })
+        .catch(() => {
+          if (!stopped) {
+            setVideoState('degraded')
+            descriptorRetry = window.setTimeout(loadVideo, 1_000)
+          }
+        })
+    }
+    loadVideo()
 
     const connectMetadata = () => {
       socket = new WebSocket(socketUrl())
@@ -70,8 +94,8 @@ export function App() {
       }
       socket.onclose = () => {
         if (!stopped) {
-          setConnection('disconnected')
-          retry = window.setTimeout(connectMetadata, 1_000)
+          setConnection((previous) => previous === 'connected' ? 'degraded' : 'disconnected')
+          metadataRetry = window.setTimeout(connectMetadata, 1_000)
         }
       }
       socket.onerror = () => socket?.close()
@@ -81,7 +105,9 @@ export function App() {
       stopped = true
       socket?.close()
       peer?.close()
-      if (retry) clearTimeout(retry)
+      if (metadataRetry) clearTimeout(metadataRetry)
+      if (videoRetry) clearTimeout(videoRetry)
+      if (descriptorRetry) clearTimeout(descriptorRetry)
     }
   }, [])
 
@@ -89,6 +115,17 @@ export function App() {
     const timer = window.setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    const updateFullscreen = () => setFullscreen(document.fullscreenElement === viewerRef.current)
+    document.addEventListener('fullscreenchange', updateFullscreen)
+    return () => document.removeEventListener('fullscreenchange', updateFullscreen)
+  }, [])
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement === viewerRef.current) await document.exitFullscreen()
+    else await viewerRef.current?.requestFullscreen()
+  }
 
   const stale = result ? isStale(result.result_timestamp, ttlSeconds, now) : false
   const visible = result && !stale ? result.detections : []
@@ -100,7 +137,7 @@ export function App() {
     <main>
       <h1>Camzilla</h1>
       <p role="status" data-state={connection}>Metadata connection: {connection}</p>
-      <section aria-label="Live camera" className="viewer">
+      <section ref={viewerRef} aria-label="Live camera" className="viewer">
         <video ref={videoRef} className="video" aria-label="Live camera video" controls muted playsInline />
         <svg className="overlay" aria-label="Detection overlay" viewBox={`0 0 ${sourceWidth} ${sourceHeight}`} preserveAspectRatio="xMidYMid meet">
           {visible.map((detection, index) => {
@@ -114,12 +151,15 @@ export function App() {
           })}
         </svg>
         {videoState !== 'connected' && (
-          <p className="video-placeholder">
+          <p className="video-placeholder" role="status">
             {videoState === 'degraded'
               ? <><span>Video connection is unavailable. </span><a href="/api/v1/diagnostics/hls/stream.m3u8">Open HLS diagnostic fallback</a></>
               : `Connecting to ${stream?.camera_name ?? 'camera'}…`}
           </p>
         )}
+        <button className="fullscreen" type="button" onClick={() => void toggleFullscreen()}>
+          {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        </button>
       </section>
       <aside aria-label="Diagnostics" className="diagnostics">
         <span>Video: {videoState}</span>

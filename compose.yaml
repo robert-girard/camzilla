@@ -9,6 +9,7 @@ services:
         required: false
     environment:
       CAMZILLA_INFERENCE_BACKEND: ${CAMZILLA_INFERENCE_BACKEND:-fake}
+      CAMZILLA_CAMERA_RTSP_URL: ${CAMZILLA_CAMERA_RTSP_URL:-}
     volumes:
       - ./models:/models:ro
     ports:
@@ -33,6 +34,8 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      CAMZILLA_CAMERA_RTSP_URL: ${CAMZILLA_CAMERA_RTSP_URL:-}
     ports:
       # Local inference/hardware smoke restream only; never browser-facing.
       - "${CAMZILLA_BIND_HOST:-127.0.0.1}:8554:8554/tcp"

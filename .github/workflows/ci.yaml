@@ -24,6 +24,15 @@ jobs:
           docker compose --env-file .env.example -f compose.yaml -f compose.dev.yaml config
       - name: Build amd64 service images
         run: docker compose --env-file .env.example build
+      - name: Smoke-test clean no-camera development stack
+        run: |
+          docker compose -f compose.yaml -f compose.dev.yaml up --build -d --wait
+          curl --fail --retry 15 --retry-all-errors --retry-delay 2 http://127.0.0.1:5173/ >/dev/null
+          curl --fail --silent http://127.0.0.1:8000/health/ready |
+            python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"] == "ready"; assert data["bridge"]["state"] == "synthetic"; assert data["metrics"]["processed_frames"] > 0'
+      - name: Stop development stack
+        if: always()
+        run: docker compose -f compose.yaml -f compose.dev.yaml down
 
   backend:
     runs-on: ubuntu-24.04

@@ -28,6 +28,11 @@ class Settings(BaseSettings):
             raise ValueError("must be fake or ultralytics")
         return value
 
+    @field_validator("camera_rtsp_url", mode="before")
+    @classmethod
+    def blank_camera_url_is_not_configured(cls, value: object) -> object:
+        return None if value == "" else value
+
     @field_validator("inference_device")
     @classmethod
     def valid_device(cls, value: str) -> str:

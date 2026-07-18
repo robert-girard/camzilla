@@ -1,3 +1,4 @@
+import httpx
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -20,6 +21,9 @@ def test_readiness_does_not_return_camera_url() -> None:
         response = client.get("/health/ready")
     assert response.status_code == 200
     assert "camera_rtsp_url" not in response.text
+    assert response.json()["camera"] == {"configured": False, "state": "not_configured"}
+    assert response.json()["bridge"] == {"state": "synthetic"}
+    assert response.json()["inference"]["fallback_reason"] is None
 
 
 def test_fake_pipeline_delivers_versioned_detection_over_websocket() -> None:
@@ -78,3 +82,38 @@ def test_hls_diagnostic_rewrites_internal_playlist_paths(monkeypatch) -> None:
         response = client.get("/api/v1/diagnostics/hls/stream.m3u8")
     assert response.status_code == 200
     assert "/api/v1/diagnostics/hls/playlist.m3u8?id=abc" in response.text
+
+
+def test_bridge_connection_failure_returns_a_sanitized_error(monkeypatch) -> None:
+    class BrokenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            request = httpx.Request("POST", "http://go2rtc:1984/api/webrtc")
+            raise httpx.ConnectError("private camera source details", request=request)
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", lambda **_kwargs: BrokenClient())
+    with TestClient(app) as client:
+        response = client.post("/api/v1/webrtc", content=b"v=0\r\n")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "video bridge unavailable"}
+    assert "private camera source details" not in response.text
+
+
+def test_hls_diagnostic_rejects_unapproved_bridge_paths() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/diagnostics/hls/admin/config")
+    assert response.status_code == 404
+
+
+def test_readiness_reports_a_redacted_source_failure() -> None:
+    with TestClient(app) as client:
+        app.state.pipeline.source_error = "RuntimeError"
+        response = client.get("/health/ready")
+    assert response.json()["status"] == "degraded"
+    assert response.json()["bridge"] == {"state": "error"}
+    assert "rtsp" not in response.text.lower()

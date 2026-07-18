@@ -68,14 +68,22 @@ async def ready() -> dict[str, object]:
     backend_health = await app.state.backend.health()
     worker: DetectionWorker = app.state.worker
     pipeline: InferencePipeline = app.state.pipeline
+    camera_configured = settings.camera_rtsp_url is not None
+    source_state = (
+        "error" if pipeline.source_error else "ready" if camera_configured else "synthetic"
+    )
     return {
-        "status": "ready",
-        "camera_configured": settings.camera_rtsp_url is not None,
+        "status": "ready" if backend_health.ready and not pipeline.source_error else "degraded",
+        "camera": {
+            "configured": camera_configured,
+            "state": "not_configured" if not camera_configured else source_state,
+        },
         "inference": {
             "backend": backend_health.backend_id,
             "model": backend_health.model_id,
             "ready": backend_health.ready,
             "device": backend_health.device,
+            "fallback_reason": backend_health.fallback_reason,
         },
         "websocket_clients": app.state.hub.clients,
         "metrics": {
@@ -85,7 +93,7 @@ async def ready() -> dict[str, object]:
             "inference_fps": worker.inference_fps,
             "last_inference_ms": worker.last_inference_ms,
         },
-        "bridge": {"state": "error" if pipeline.source_error else "ready"},
+        "bridge": {"state": source_state},
     }
 
 

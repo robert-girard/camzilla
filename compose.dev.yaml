@@ -10,6 +10,7 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
 
   frontend:
+    build: !reset null
     image: node:24-alpine
     working_dir: /app
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"

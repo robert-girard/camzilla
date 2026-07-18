@@ -37,10 +37,17 @@ The helper script `onvif_stream.py` queries the ONVIF media service for profiles
 
 Known profiles:
 
-- `PROFILE_000`
-- `PROFILE_001`
+- `PROFILE_000`: H.264, 2304x1296, 15 FPS, 1536 kbps
+- `PROFILE_001`: H.264, 640x360, 15 FPS, 512 kbps
 
-The first profile returned this RTSP URL:
+Both profiles returned an RTSP URI in the sanitized 2026-07-17 discovery run.
+Phase 1 selects `PROFILE_000` for the viewer and the single shared go2rtc
+upstream. Inference consumes that same local restream and resizes internally;
+using `PROFILE_001` for inference would otherwise require a second upstream
+camera session or reduce viewer quality. Revisit this tradeoff only if measured
+decode cost justifies changing the fan-out design.
+
+The first profile returned this sanitized RTSP URL shape:
 
 ```text
 rtsp://${CAMERA_HOST}:${RTSP_PORT}${RTSP_PATH}
