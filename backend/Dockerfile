@@ -13,7 +13,10 @@ RUN mkdir app && touch app/__init__.py \
     && pip install --no-cache-dir ".[ultralytics]" "ultralytics==8.4.92" \
     && pip uninstall --yes opencv-python \
     && pip install --no-cache-dir "opencv-python-headless==5.0.0.93"
+RUN install -d -o appuser -g appuser /data /media
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
 USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"

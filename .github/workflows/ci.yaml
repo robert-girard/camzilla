@@ -23,7 +23,10 @@ jobs:
           docker compose --env-file .env.example config
           docker compose --env-file .env.example -f compose.yaml -f compose.dev.yaml config
       - name: Build amd64 service images
-        run: docker compose --env-file .env.example build
+        run: |
+          docker compose --env-file .env.example build
+          docker compose --env-file .env.example run --rm --no-deps api \
+            python -c 'from pathlib import Path; assert Path("/app/alembic.ini").is_file(); assert Path("/app/migrations/versions/0001_phase3_state.py").is_file(); assert Path("/data").is_dir(); assert Path("/media").is_dir()'
       - name: Smoke-test clean no-camera development stack
         run: |
           docker compose -f compose.yaml -f compose.dev.yaml up --build -d --wait
