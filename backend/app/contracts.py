@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Literal
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -115,3 +116,49 @@ class PtzMoveResponse(BaseModel):
     status: Literal["accepted"] = "accepted"
     direction: PtzDirection
     duration_seconds: float
+
+
+class AlertRule(BaseModel):
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]+$")
+    camera_name: str
+    target_classes: frozenset[str] = frozenset({"person"})
+    confidence_threshold: float = Field(default=0.6, ge=0, le=1)
+    debounce_seconds: float = Field(default=300, ge=1, le=86400)
+    enabled: bool = True
+
+
+class AlertEvent(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    rule_id: str
+    camera_name: str
+    triggered_at: datetime
+    detection_sequence: int = Field(ge=0)
+    matched_classes: frozenset[str]
+
+
+class AlertAttachment(BaseModel):
+    filename: str = Field(min_length=1, max_length=120, pattern=r"^[a-zA-Z0-9_.-]+$")
+    mime_type: str = Field(pattern=r"^[a-z0-9.+-]+/[a-z0-9.+-]+$")
+    data: bytes = Field(max_length=8 * 1024 * 1024)
+
+
+class AlertPayload(BaseModel):
+    event: AlertEvent
+    text: str = Field(min_length=1, max_length=2000)
+    attachments: list[AlertAttachment] = Field(default_factory=list, max_length=10)
+
+
+class AlertRuntimeStatus(BaseModel):
+    rule: AlertRule
+    requested_notifier: Literal["dry-run", "discord"]
+    effective_notifier: Literal["dry-run", "discord"]
+    external_delivery_configured: bool
+    configuration_reason: str | None = None
+    queued_events: int
+    delivered_events: int
+    dry_run_events: int
+    failed_events: int
+    dropped_events: int
+    suppressed_events: int
+    last_event_at: datetime | None = None
+    last_error: str | None = None

@@ -82,6 +82,7 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
 - The frame sampler submits at a configured target rate. It must keep draining the source between samples rather than sleeping between decoder reads, because decoder-internal buffering would otherwise bypass latest-frame-wins semantics. A size-one or small bounded queue exposes processed, dropped, failed, and latency metrics.
 - Service/process shutdown must close streams and runtimes explicitly. RKNN initialization/shutdown behavior is validated on the Orange Pi rather than inferred from x86 behavior.
 - Runtime model/target changes use the same explicit lifecycle. A switch lock prevents concurrent workers from racing; video stays independent, while detection readiness reports the transition and resumes only after the new identity is confirmed.
+- Alert evaluation is isolated from inference and notification I/O. Qualifying results enter a size-one bounded delivery queue after debounce; the queued frame is copied, annotated in memory, and released after delivery. Notifier timeout/retry/rate-limit failures update redacted status without terminating inference. Pre-auth Discord delivery requires both valid external secret configuration and an explicit confirmation flag; otherwise the rule runs through the dry-run adapter.
 
 ## 6. Detection Model Notes
 

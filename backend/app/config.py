@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SUPPORTED_MODEL_IDS = frozenset({"yolov8n", "yolov8s", "yolov8m", "yolo11n", "yolo11s", "yolo11m"})
@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     onvif_user: str | None = None
     onvif_password: str | None = None
     onvif_profile: str = "PROFILE_000"
+    alerts_enabled: bool = True
+    alert_classes: str = "person"
+    alert_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
+    alert_debounce_seconds: float = Field(default=300, ge=1, le=86400)
+    notifier: str = "dry-run"
+    discord_webhook_url: SecretStr | None = None
+    discord_delivery_confirmed: bool = False
 
     @field_validator("inference_backend")
     @classmethod
@@ -58,6 +65,13 @@ class Settings(BaseSettings):
             raise ValueError(f"must be one of: {supported}")
         return value
 
+    @field_validator("notifier")
+    @classmethod
+    def valid_notifier(cls, value: str) -> str:
+        if value not in {"dry-run", "discord"}:
+            raise ValueError("must be dry-run or discord")
+        return value
+
     @property
     def resolved_model_path(self) -> str:
         return self.model_path or f"/models/{self.model_id}.pt"
@@ -81,6 +95,10 @@ class Settings(BaseSettings):
     @property
     def class_filter(self) -> frozenset[str]:
         return frozenset(item.strip() for item in self.allowed_classes.split(",") if item.strip())
+
+    @property
+    def alert_class_filter(self) -> frozenset[str]:
+        return frozenset(item.strip() for item in self.alert_classes.split(",") if item.strip())
 
     @property
     def ptz_configuration_complete(self) -> bool:

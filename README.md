@@ -103,6 +103,28 @@ attended checklist:
 5. Set `CAMZILLA_PTZ_VERIFIED=true` only after the attended check succeeds.
    Set it back to `false` whenever the camera, profile, or mounting changes.
 
+### Alert delivery safety
+
+The Phase 2 person rule is enabled by default but uses the `dry-run` notifier,
+so qualifying detections exercise debounce, snapshot rendering, and status
+accounting without making an external request. Inspect its redacted state at
+`http://127.0.0.1:8000/api/v1/alerts/status`. Snapshots exist only in the
+bounded delivery queue and are released after evaluation; Phase 2 does not
+write them to disk.
+
+Real Discord delivery requires all three settings in the ignored `.env`:
+
+```sh
+CAMZILLA_NOTIFIER=discord
+CAMZILLA_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/REPLACE/REPLACE
+CAMZILLA_DISCORD_DELIVERY_CONFIRMED=true
+```
+
+Without a valid HTTPS Discord webhook and the explicit confirmation flag, the
+API safely falls back to dry-run and reports why without returning the URL.
+Discord requests use bounded timeouts, retries, and rate-limit backoff. Do not
+paste webhook URLs into logs, tests, issues, or browser fields.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 

@@ -85,6 +85,16 @@ def test_ptz_capability_is_unavailable_until_operation_verified() -> None:
     assert move.json() == {"detail": "PTZ is unavailable"}
 
 
+def test_alert_status_defaults_to_external_delivery_safe_dry_run() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/alerts/status")
+    assert response.status_code == 200
+    assert response.json()["requested_notifier"] == "dry-run"
+    assert response.json()["effective_notifier"] == "dry-run"
+    assert response.json()["external_delivery_configured"] is False
+    assert "webhook" not in response.text.lower()
+
+
 def test_ptz_endpoint_uses_bounded_request_and_redacts_adapter_failure() -> None:
     class BrokenController:
         async def continuous_move(self, _request):

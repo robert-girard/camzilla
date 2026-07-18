@@ -7,8 +7,10 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
+from .alerts import AlertEngine, build_alert_engine
 from .config import Settings, get_settings
 from .contracts import (
+    AlertRuntimeStatus,
     InferenceCapabilitiesResponse,
     InferenceSelectionRequest,
     PtzCapabilityResponse,
@@ -73,8 +75,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backend_health = await backend.health()
     hub = DetectionHub()
     app.state.hub = hub
+    alert_engine = build_alert_engine(settings)
+    await alert_engine.start()
+    app.state.alert_engine = alert_engine
     app.state.worker = DetectionWorker(
-        backend, settings.class_filter, settings.confidence_threshold, hub.publish
+        backend,
+        settings.class_filter,
+        settings.confidence_threshold,
+        hub.publish,
+        alert_engine.observe,
     )
     # The physical-camera URL is only supplied to go2rtc. Inference consumes its
     # local restream; no-camera development/CI remains deterministic.
@@ -129,6 +138,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with suppress(asyncio.CancelledError):
             await heartbeat
         await pipeline.close()
+        await alert_engine.close()
         await app.state.worker.backend.close()
 
 
@@ -147,6 +157,8 @@ async def ready() -> dict[str, object]:
     backend_health = await selection.worker.backend.health()
     worker: DetectionWorker = app.state.worker
     pipeline: InferencePipeline = app.state.pipeline
+    alert_engine: AlertEngine = app.state.alert_engine
+    alert_status = alert_engine.status()
     camera_configured = settings.camera_rtsp_url is not None
     source_state = (
         "error" if pipeline.source_error else "ready" if camera_configured else "synthetic"
@@ -157,6 +169,7 @@ async def ready() -> dict[str, object]:
             if backend_health.ready
             and not pipeline.source_error
             and selection.transition_state == "ready"
+            and alert_status.last_error is None
             else "degraded"
         ),
         "camera": {
@@ -174,15 +187,23 @@ async def ready() -> dict[str, object]:
             "transition_error": selection.transition_error,
         },
         "websocket_clients": app.state.hub.clients,
+        "alerts": alert_status.model_dump(mode="json"),
         "metrics": {
             "processed_frames": worker.processed_frames,
             "failed_frames": worker.failed_frames,
+            "observer_failures": worker.observer_failures,
             "dropped_frames": pipeline.dropped_frames,
             "inference_fps": worker.inference_fps,
             "last_inference_ms": worker.last_inference_ms,
         },
         "bridge": {"state": source_state},
     }
+
+
+@app.get("/api/v1/alerts/status", response_model=AlertRuntimeStatus)
+async def alert_status() -> AlertRuntimeStatus:
+    alert_engine: AlertEngine = app.state.alert_engine
+    return alert_engine.status()
 
 
 @app.get("/api/v1/inference", response_model=InferenceCapabilitiesResponse)

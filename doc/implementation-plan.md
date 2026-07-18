@@ -271,15 +271,15 @@ The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first came
 
 #### Alerts and reliability
 
-- [ ] Define alert rule, event, attachment, and notifier contracts; begin with one camera, `person`, confidence threshold, and debounce.
-- [ ] Implement an async Discord webhook adapter with timeout, retry/backoff, rate-limit handling, and secret redaction.
-- [ ] Capture a bounded in-memory snapshot at trigger time, annotate a copy, and avoid persistence unless explicitly enabled.
-- [ ] Add reconnect/backoff and state transitions for camera, restream, inference, and notifier failures.
-- [ ] Add stream-down notification policy with state-based suppression to prevent alert storms.
-- [ ] Provide a dry-run notifier and require explicit confirmation/configuration before sending real alerts.
-- [ ] Test debounce boundaries, duplicate suppression, attachment limits, retry policy, reconnect, secret redaction, and notifier failure isolation.
-- [ ] Add Playwright coverage for PTZ states, alert rule display/dry-run, degraded health, and recovery.
-- [ ] Run a sustained production-like x86 smoke through service restart using CPU and available CUDA, recording latency, throughput, memory, and recovery behavior without retaining private media.
+- [x] Define alert rule, event, attachment, and notifier contracts; begin with one camera, `person`, confidence threshold, and debounce.
+- [x] Implement an async Discord webhook adapter with timeout, retry/backoff, rate-limit handling, and secret redaction.
+- [x] Capture a bounded in-memory snapshot at trigger time, annotate a copy, and avoid persistence unless explicitly enabled.
+- [~] Add reconnect/backoff and state transitions for camera, restream, inference, and notifier failures.
+- [~] Add stream-down notification policy with state-based suppression to prevent alert storms.
+- [x] Provide a dry-run notifier and require explicit confirmation/configuration before sending real alerts.
+- [~] Test debounce boundaries, duplicate suppression, attachment limits, retry policy, reconnect, secret redaction, and notifier failure isolation.
+- [~] Add Playwright coverage for PTZ states, alert rule display/dry-run, degraded health, and recovery.
+- [~] Run a sustained production-like x86 smoke through service restart using CPU and available CUDA, recording latency, throughput, memory, and recovery behavior without retaining private media.
 
 ### Exit criteria
 

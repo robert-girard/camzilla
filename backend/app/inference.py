@@ -172,14 +172,17 @@ class DetectionWorker:
         allowed_classes: frozenset[str],
         confidence_threshold: float,
         publish: Callable[[DetectionMessage], Awaitable[None]],
+        observe: Callable[[Frame, DetectionMessage], None] | None = None,
     ) -> None:
         self.backend = backend
         self.allowed_classes = allowed_classes
         self.confidence_threshold = confidence_threshold
         self.publish = publish
+        self.observe = observe
         self.sequence = 0
         self.processed_frames = 0
         self.failed_frames = 0
+        self.observer_failures = 0
         self.last_inference_ms: float | None = None
         self._started_at = perf_counter()
         self._process_lock = asyncio.Lock()
@@ -219,6 +222,11 @@ class DetectionWorker:
                 self.sequence += 1
                 self.last_inference_ms = message.inference_ms
                 await self.publish(message)
+                if self.observe:
+                    try:
+                        self.observe(frame, message)
+                    except Exception:
+                        self.observer_failures += 1
                 return message
             except Exception:
                 self.failed_frames += 1
@@ -232,6 +240,7 @@ class DetectionWorker:
             self.sequence = 0
             self.processed_frames = 0
             self.failed_frames = 0
+            self.observer_failures = 0
             self.last_inference_ms = None
             self._started_at = perf_counter()
             return previous
