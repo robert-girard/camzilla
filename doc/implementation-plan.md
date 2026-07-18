@@ -307,15 +307,19 @@ The system becomes convenient for daily personal use before authentication is in
 - [x] Implement SQLite persistence through SQLAlchemy 2 with Alembic migrations for the single-node deployment; keep media outside database rows and avoid SQLite database files on network filesystems.
 - [x] Persist cameras, capability results, the active inference backend/model/target selection, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
 - [x] Keep the persistence/domain boundary compatible with a later PostgreSQL adapter and document the operational conditions that justify migration (multiple app instances, shared/remote database, or sustained write contention).
-- [ ] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion.
-- [ ] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
+- [~] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion; metadata/API/UI are complete, while media access awaits the clip/retention slice.
+- [x] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
 - [ ] Add pre-roll ring buffering and configurable 5–30 second alert clips with storage quotas and oldest-first retention.
 - [ ] Add manual recording only after retention and disk-full behavior are tested.
 - [ ] Generalize orchestration/UI to multiple cameras while sharing or pooling inference workers based on measured memory/throughput.
 - [x] Add optimistic config versioning before multiple authenticated editors exist, so Phase 4 does not retrofit it.
 - [ ] Add backup/export with secrets excluded by default and explicit restore validation.
 - [ ] Unit/integration-test migrations, rules, zones, schedules, retention, disk-full handling, multi-camera fairness, and backup/restore.
-- [ ] Add Playwright coverage for history filters, rule editing conflicts/validation, zone drawing, clip playback, and multi-camera degraded states.
+- [~] Add Playwright coverage for history filters, rule editing conflicts/validation, zone drawing, clip playback, and multi-camera degraded states; history/rules/zones pass, while clip and multi-camera cases await their implementation slices.
+
+### Phase 3 validation evidence
+
+- 2026-07-17: The initial migration, repository, runtime integration, history/config APIs, and selection rollback passed 75 backend tests plus 8 expected opt-in skips. Sixteen deterministic Playwright flows passed, including history filtering/deletion, optimistic conflict handling, schedule/rule editing, normalized zone drawing/preview, and client validation. Schema and API responses contain secret references or redacted capability state only, never secret values or authenticated URLs.
 - [ ] Extend GitHub Actions with migration checks and schema/API compatibility checks; deployment remains manual.
 
 ### Exit criteria

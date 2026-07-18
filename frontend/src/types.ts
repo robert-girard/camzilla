@@ -77,6 +77,67 @@ export type HealthStatus = {
   bridge: { state: string }
 }
 
+export type ZonePoint = { x: number; y: number }
+
+export type CameraConfiguration = {
+  id: string
+  name: string
+  enabled: boolean
+  capabilities: Record<string, unknown>
+  allowed_categories: string[]
+  catalog_revision: string
+  version: number
+}
+
+export type AlertRuleConfiguration = {
+  id: string
+  camera_id: string
+  enabled: boolean
+  target_categories: string[]
+  confidence_threshold: number
+  debounce_seconds: number
+  schedule_start?: string
+  schedule_end?: string
+  zone?: { points: ZonePoint[] }
+  version: number
+}
+
+export type GlobalConfiguration = {
+  version: number
+  active_capability_id: string
+  cameras: CameraConfiguration[]
+  alert_rules: AlertRuleConfiguration[]
+}
+
+export type AlertRuleUpdate = {
+  expected_config_version: number
+  confidence_threshold: number
+  debounce_seconds: number
+  schedule_start?: string
+  schedule_end?: string
+  zone?: { points: ZonePoint[] }
+  target_categories: string[]
+}
+
+export type EventSummary = {
+  id: string
+  camera_id: string
+  rule_id?: string
+  event_type: string
+  triggered_at: string
+  categories: string[]
+  has_snapshot: boolean
+  has_clip: boolean
+}
+
+export type EventPage = {
+  items: EventSummary[]
+  page: number
+  page_size: number
+  total: number
+  pages: number
+}
+
 export type InferenceTarget = 'cpu' | 'gpu' | 'npu' | 'tpu'
 
 export type InferenceCapability = {

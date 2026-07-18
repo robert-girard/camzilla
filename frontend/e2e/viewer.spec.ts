@@ -6,6 +6,7 @@ type MockOptions = {
   switchDelayMs?: number
   ptzAvailable?: boolean
   ptzFailure?: boolean
+  ruleConflict?: boolean
 }
 
 function detectionMessage() {
@@ -69,6 +70,25 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       value: () => sockets.at(-1)?.onclose?.(new CloseEvent('close')),
     })
     Object.defineProperty(window, '__camzillaPtzMoves', { value: [] as string[] })
+    Object.defineProperty(window, '__camzillaLastRuleUpdate', { value: null, writable: true })
+    const configuration = {
+      version: 3, active_capability_id: 'fake:yolov8n:cpu',
+      cameras: [{
+        id: 'front-door', name: 'front-door', enabled: true, capabilities: {},
+        allowed_categories: ['person'], catalog_revision: 'person-v1', version: 1,
+      }],
+      alert_rules: [{
+        id: 'person-detected', camera_id: 'front-door', enabled: true,
+        target_categories: ['person'], confidence_threshold: 0.6, debounce_seconds: 300,
+        schedule_start: null, schedule_end: null, zone: null, version: 1,
+      }],
+    }
+    let events = [{
+      id: '11111111-1111-4111-8111-111111111111', camera_id: 'front-door',
+      rule_id: 'person-detected', event_type: 'detection',
+      triggered_at: new Date().toISOString(), categories: ['person'],
+      has_snapshot: false, has_clip: false,
+    }]
     const health = { status: 'ready', camera: 'not_configured', inference: 'ready' }
     Object.defineProperty(window, '__camzillaSetHealth', {
       value: (status: string, camera: string, inference: string) => {
@@ -151,6 +171,42 @@ async function installMocks(page: Page, options: MockOptions = {}) {
           camera: { configured: false, state: health.camera },
           inference: { state: health.inference },
           alerts: {}, bridge: { state: health.camera },
+        }), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/alert-rules/')) {
+        if (settings.ruleConflict) {
+          return new Response(JSON.stringify({ detail: 'configuration version conflict' }), {
+            status: 409, headers: { 'content-type': 'application/json' },
+          })
+        }
+        const update = JSON.parse(String(init?.body))
+        const testWindow = window as typeof window & { __camzillaLastRuleUpdate: unknown }
+        testWindow.__camzillaLastRuleUpdate = update
+        configuration.version += 1
+        configuration.alert_rules[0] = {
+          ...configuration.alert_rules[0], ...update,
+          zone: update.zone ?? null,
+          schedule_start: update.schedule_start ?? null,
+          schedule_end: update.schedule_end ?? null,
+          version: configuration.alert_rules[0].version + 1,
+        }
+        return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/config')) {
+        return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/events/')) {
+        const eventId = url.split('/').at(-1)
+        events = events.filter((item) => item.id !== eventId)
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes('/api/v1/events?')) {
+        const parsed = new URL(url, location.origin)
+        const type = parsed.searchParams.get('event_type')
+        const selected = events.filter((item) => !type || item.event_type === type)
+        return new Response(JSON.stringify({
+          items: selected, page: 1, page_size: 10, total: selected.length,
+          pages: selected.length ? 1 : 0,
         }), { headers: { 'content-type': 'application/json' } })
       }
       if (settings.videoFailure) return new Response('unavailable', { status: 503 })
@@ -312,4 +368,49 @@ test('shows system degradation and recovery from health polling', async ({ page 
   })
   await expect(status).toContainText('System: ready', { timeout: 2_000 })
   await expect(status).toContainText('Camera streamready')
+})
+
+test('filters and deletes persistent alert history', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  await expect(history).toContainText('detection')
+  await history.getByLabel('Event type').selectOption('stream-down')
+  await expect(history).toContainText('No alert events match this filter.')
+  await history.getByLabel('Event type').selectOption('')
+  await history.getByRole('button', { name: 'Delete' }).click()
+  await expect(history).toContainText('No alert events match this filter.')
+})
+
+test('edits rule values and draws a normalized zone', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  await history.getByLabel('Confidence (%)').fill('75')
+  await history.getByLabel('Debounce (seconds)').fill('60')
+  await history.getByLabel('Enable schedule').check()
+  const zone = history.getByLabel('Detection zone editor')
+  await zone.click({ position: { x: 40, y: 30 } })
+  await zone.click({ position: { x: 250, y: 30 } })
+  await zone.click({ position: { x: 150, y: 130 } })
+  await history.getByRole('button', { name: 'Save rule' }).click()
+  await expect(history.getByText('Rule saved')).toBeVisible()
+  const update = await page.evaluate(() => {
+    const testWindow = window as typeof window & { __camzillaLastRuleUpdate: { zone: { points: unknown[] }; confidence_threshold: number } }
+    return testWindow.__camzillaLastRuleUpdate
+  })
+  expect(update.confidence_threshold).toBe(0.75)
+  expect(update.zone.points).toHaveLength(3)
+})
+
+test('validates incomplete zones and reports optimistic conflicts', async ({ page }) => {
+  await installMocks(page, { ruleConflict: true })
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  await history.getByLabel('Detection zone editor').click({ position: { x: 40, y: 30 } })
+  await history.getByRole('button', { name: 'Save rule' }).click()
+  await expect(history.getByRole('alert')).toHaveText('A zone needs at least three points or must be cleared.')
+  await history.getByRole('button', { name: 'Clear zone' }).click()
+  await history.getByRole('button', { name: 'Save rule' }).click()
+  await expect(history.getByRole('alert')).toHaveText('configuration version conflict')
 })

@@ -1,6 +1,9 @@
 import type {
   InferenceCapabilitiesResponse,
   AlertRuntimeStatus,
+  AlertRuleUpdate,
+  EventPage,
+  GlobalConfiguration,
   HealthStatus,
   PtzCapability,
   PtzDirection,
@@ -75,4 +78,37 @@ export async function getHealthStatus(): Promise<HealthStatus> {
   const response = await fetch('/health/ready')
   if (!response.ok) throw await responseError(response, 'system health unavailable')
   return response.json() as Promise<HealthStatus>
+}
+
+export async function getConfiguration(): Promise<GlobalConfiguration> {
+  const response = await fetch('/api/v1/config')
+  if (!response.ok) throw await responseError(response, 'configuration unavailable')
+  return response.json() as Promise<GlobalConfiguration>
+}
+
+export async function updateAlertRule(ruleId: string, update: AlertRuleUpdate): Promise<GlobalConfiguration> {
+  const response = await fetch(`/api/v1/alert-rules/${encodeURIComponent(ruleId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  if (!response.ok) throw await responseError(response, 'rule update failed')
+  return response.json() as Promise<GlobalConfiguration>
+}
+
+export async function getEvents(options: {
+  page: number; eventType: string; sort: 'asc' | 'desc'
+}): Promise<EventPage> {
+  const params = new URLSearchParams({
+    page: String(options.page), page_size: '10', sort: options.sort,
+  })
+  if (options.eventType) params.set('event_type', options.eventType)
+  const response = await fetch(`/api/v1/events?${params}`)
+  if (!response.ok) throw await responseError(response, 'event history unavailable')
+  return response.json() as Promise<EventPage>
+}
+
+export async function deleteEvent(eventId: string): Promise<void> {
+  const response = await fetch(`/api/v1/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' })
+  if (!response.ok) throw await responseError(response, 'event deletion failed')
 }

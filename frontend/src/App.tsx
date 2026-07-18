@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { exchangeWebRtcOffer, getStreamDescriptor } from './api'
 import { AlertStatus } from './AlertStatus'
+import { HistoryAndRules } from './HistoryAndRules'
 import { InferenceSelector } from './InferenceSelector'
 import { isStale, sourceRect } from './overlay'
 import { PtzControls } from './PtzControls'
@@ -185,6 +186,7 @@ export function App() {
         onResetDetections={() => setResult(undefined)}
         onSelectionChange={setConfirmedInference}
       />
+      <HistoryAndRules />
     </main>
   )
 }
