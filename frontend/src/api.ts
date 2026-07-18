@@ -2,6 +2,8 @@ import type {
   InferenceCapabilitiesResponse,
   AlertRuntimeStatus,
   AlertRuleUpdate,
+  BackupDocument,
+  BackupValidation,
   EventPage,
   GlobalConfiguration,
   RecordingResponse,
@@ -128,4 +130,24 @@ export async function stopRecording(recordingId: string): Promise<RecordingRespo
   })
   if (!response.ok) throw await responseError(response, 'recording could not stop')
   return response.json() as Promise<RecordingResponse>
+}
+
+export async function validateBackup(document: unknown): Promise<BackupValidation> {
+  const response = await fetch('/api/v1/backup/validate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ document }),
+  })
+  if (!response.ok) throw await responseError(response, 'backup validation failed')
+  return response.json() as Promise<BackupValidation>
+}
+
+export async function restoreBackup(
+  expectedConfigVersion: number, document: BackupDocument,
+): Promise<GlobalConfiguration> {
+  const response = await fetch('/api/v1/backup', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expected_config_version: expectedConfigVersion, document }),
+  })
+  if (!response.ok) throw await responseError(response, 'backup restore failed')
+  return response.json() as Promise<GlobalConfiguration>
 }

@@ -6,9 +6,17 @@ import {
   getEvents,
   startRecording,
   stopRecording,
+  restoreBackup,
   updateAlertRule,
+  validateBackup,
 } from './api'
-import type { AlertRuleConfiguration, EventPage, GlobalConfiguration, ZonePoint } from './types'
+import type {
+  AlertRuleConfiguration,
+  BackupDocument,
+  EventPage,
+  GlobalConfiguration,
+  ZonePoint,
+} from './types'
 
 type RuleDraft = {
   confidence: number
@@ -41,6 +49,7 @@ export function HistoryAndRules() {
   const [notice, setNotice] = useState<string>()
   const [saving, setSaving] = useState(false)
   const [recordingId, setRecordingId] = useState<string>()
+  const [backup, setBackup] = useState<BackupDocument>()
 
   useEffect(() => {
     void getConfiguration()
@@ -127,6 +136,37 @@ export function HistoryAndRules() {
     }
   }
 
+  const loadBackup = async (file?: File) => {
+    setBackup(undefined)
+    setError(undefined)
+    if (!file) return
+    try {
+      const document = JSON.parse(await file.text()) as BackupDocument
+      const validation = await validateBackup(document)
+      if (!validation.valid) {
+        setError(validation.errors.join('; '))
+        return
+      }
+      setBackup(document)
+      setNotice('Backup is valid and ready to restore')
+    } catch {
+      setError('Backup file is not valid JSON')
+    }
+  }
+
+  const restore = async () => {
+    if (!backup || !configuration) return
+    try {
+      const restored = await restoreBackup(configuration.version, backup)
+      setConfiguration(restored)
+      if (restored.alert_rules[0]) setDraft(draftFrom(restored.alert_rules[0]))
+      setBackup(undefined)
+      setNotice('Configuration restored')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'backup restore failed')
+    }
+  }
+
   const rule = configuration?.alert_rules[0]
   const polygon = draft?.zone.map((point) => `${point.x * 100},${point.y * 100}`).join(' ')
 
@@ -145,6 +185,11 @@ export function HistoryAndRules() {
             )}
           </article>
         ))}
+      </div>
+      <div className="backup-controls">
+        <a href="/api/v1/backup" download="camzilla-configuration.json">Export configuration</a>
+        <label>Validate backup<input aria-label="Backup file" type="file" accept="application/json,.json" onChange={(event) => void loadBackup(event.target.files?.[0])} /></label>
+        <button type="button" disabled={!backup} onClick={() => void restore()}>Restore validated backup</button>
       </div>
       {rule && draft && (
         <form onSubmit={(event) => { event.preventDefault(); void save() }} className="rule-editor">

@@ -140,6 +140,19 @@ export type EventPage = {
 
 export type RecordingResponse = { id: string; status: 'recording' | 'processing' }
 
+export type BackupDocument = {
+  schema_version: '1'
+  exported_at: string
+  secrets_included: false
+  active_capability_id: string
+  cameras: Array<{
+    id: string; name: string; enabled: boolean; allowed_categories: string[]; catalog_revision: string
+  }>
+  alert_rules: Array<Omit<AlertRuleConfiguration, 'version'>>
+}
+
+export type BackupValidation = { valid: boolean; errors: string[] }
+
 export type InferenceTarget = 'cpu' | 'gpu' | 'npu' | 'tpu'
 
 export type InferenceCapability = {

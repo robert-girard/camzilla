@@ -201,6 +201,15 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       if (url.includes('/api/v1/config')) {
         return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
       }
+      if (url.includes('/api/v1/backup/validate')) {
+        return new Response(JSON.stringify({ valid: true, errors: [] }), {
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/api/v1/backup')) {
+        configuration.version += 1
+        return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
+      }
       if (url.includes('/api/v1/cameras/front-door/recordings')) {
         return new Response(JSON.stringify({
           id: '22222222-2222-4222-8222-222222222222', status: 'recording',
@@ -419,6 +428,29 @@ test('shows multiple camera runtime states without duplicating active controls',
   await expect(cameras).toContainText('front-doorsynthetic')
   await expect(cameras).toContainText('side-doordegraded')
   await expect(cameras.getByRole('button', { name: 'Start recording' })).toHaveCount(1)
+})
+
+test('validates a secret-free backup before restoring configuration', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  await expect(history.getByRole('link', { name: 'Export configuration' })).toHaveAttribute(
+    'href', '/api/v1/backup',
+  )
+  await history.getByLabel('Backup file').setInputFiles({
+    name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({
+      schema_version: '1', exported_at: new Date().toISOString(), secrets_included: false,
+      active_capability_id: 'fake:yolov8n:cpu',
+      cameras: [{
+        id: 'front-door', name: 'front-door', enabled: true,
+        allowed_categories: ['person'], catalog_revision: 'person-v1',
+      }],
+      alert_rules: [],
+    })),
+  })
+  await expect(history.getByText('Backup is valid and ready to restore')).toBeVisible()
+  await history.getByRole('button', { name: 'Restore validated backup' }).click()
+  await expect(history.getByText('Configuration restored')).toBeVisible()
 })
 
 test('edits rule values and draws a normalized zone', async ({ page }) => {

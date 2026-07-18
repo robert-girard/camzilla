@@ -12,12 +12,17 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket,
 from fastapi.responses import FileResponse
 
 from .alerts import AlertEngine, build_alert_engine
+from .backup import build_backup, validate_backup
 from .config import Settings, get_settings
 from .contracts import (
     AlertPayload,
     AlertRule,
     AlertRuleUpdate,
     AlertRuntimeStatus,
+    BackupDocument,
+    BackupRestoreRequest,
+    BackupValidationRequest,
+    BackupValidationResponse,
     CameraCreate,
     EventPage,
     GlobalConfiguration,
@@ -382,6 +387,71 @@ async def add_camera(request: CameraCreate) -> GlobalConfiguration:
     except ValueError as error:
         raise HTTPException(status_code=409, detail="camera already exists") from error
     return await asyncio.to_thread(repository.configuration)
+
+
+@app.get("/api/v1/backup", response_model=BackupDocument)
+async def export_backup() -> BackupDocument:
+    repository: Repository = app.state.repository
+    current = await asyncio.to_thread(repository.configuration)
+    return build_backup(current)
+
+
+@app.post("/api/v1/backup/validate", response_model=BackupValidationResponse)
+async def validate_backup_document(request: BackupValidationRequest) -> BackupValidationResponse:
+    return validate_backup(request.document)
+
+
+@app.put("/api/v1/backup", response_model=GlobalConfiguration)
+async def restore_backup(request: BackupRestoreRequest) -> GlobalConfiguration:
+    selection: InferenceSelectionService = app.state.selection
+    spec = selection.specs.get(request.document.active_capability_id)
+    if spec is None or not spec.capability.available:
+        raise HTTPException(status_code=422, detail="backup inference selection is unavailable")
+    camera_categories = {
+        camera.id: set(camera.allowed_categories) for camera in request.document.cameras
+    }
+    if any(
+        not set(rule.target_categories) <= camera_categories[rule.camera_id]
+        for rule in request.document.alert_rules
+    ):
+        raise HTTPException(status_code=422, detail="backup rule category is not enabled")
+    repository: Repository = app.state.repository
+    try:
+        await asyncio.to_thread(
+            repository.restore_backup,
+            request.document,
+            expected_config_version=request.expected_config_version,
+        )
+    except ConfigurationConflictError as error:
+        raise HTTPException(status_code=409, detail="configuration version conflict") from error
+    if selection.active_capability_id != request.document.active_capability_id:
+        callback = selection.selection_changed
+        selection.selection_changed = None
+        try:
+            await selection.select(request.document.active_capability_id)
+        finally:
+            selection.selection_changed = callback
+    restored = await asyncio.to_thread(repository.configuration)
+    restored_rule = next((item for item in restored.alert_rules if item.enabled), None)
+    if restored_rule:
+        alert_engine: AlertEngine = app.state.alert_engine
+        camera = next(item for item in restored.cameras if item.id == restored_rule.camera_id)
+        alert_engine.rule = AlertRule(
+            id=restored_rule.id,
+            camera_name=camera.name,
+            target_classes=frozenset(restored_rule.target_categories),
+            confidence_threshold=restored_rule.confidence_threshold,
+            debounce_seconds=restored_rule.debounce_seconds,
+            enabled=restored_rule.enabled,
+            schedule_start=restored_rule.schedule_start,
+            schedule_end=restored_rule.schedule_end,
+            zone=(
+                [(point.x, point.y) for point in restored_rule.zone.points]
+                if restored_rule.zone
+                else None
+            ),
+        )
+    return restored
 
 
 @app.put("/api/v1/alert-rules/{rule_id}", response_model=GlobalConfiguration)

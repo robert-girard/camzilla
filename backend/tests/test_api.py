@@ -157,6 +157,37 @@ def test_additional_camera_persists_only_a_secret_reference() -> None:
     assert unsafe.status_code == 422
 
 
+def test_backup_export_validation_and_optimistic_restore_are_secret_free() -> None:
+    with TestClient(app) as client:
+        exported = client.get("/api/v1/backup")
+        document = exported.json()
+        version = client.get("/api/v1/config").json()["version"]
+        validation = client.post("/api/v1/backup/validate", json={"document": document})
+        invalid = client.post(
+            "/api/v1/backup/validate",
+            json={"document": {**document, "schema_version": "private-invalid-value"}},
+        )
+        document["alert_rules"][0]["confidence_threshold"] = 0.77
+        restored = client.put(
+            "/api/v1/backup",
+            json={"expected_config_version": version, "document": document},
+        )
+        conflict = client.put(
+            "/api/v1/backup",
+            json={"expected_config_version": version, "document": document},
+        )
+    assert exported.status_code == 200
+    assert exported.json()["secrets_included"] is False
+    assert "secret_ref" not in exported.text.lower()
+    assert "CAMZILLA_CAMERA_RTSP_URL" not in exported.text
+    assert validation.json() == {"valid": True, "errors": []}
+    assert invalid.json()["valid"] is False
+    assert "private-invalid-value" not in invalid.text
+    assert restored.status_code == 200
+    assert restored.json()["alert_rules"][0]["confidence_threshold"] == 0.77
+    assert conflict.status_code == 409
+
+
 def test_rule_update_rejects_invalid_zone_schedule_and_disabled_category() -> None:
     with TestClient(app) as client:
         version = client.get("/api/v1/config").json()["version"]

@@ -49,6 +49,13 @@ jobs:
           uv run ruff format --check .
           uv run mypy app
           uv run pytest
+      - name: Verify migrations and schema compatibility
+        working-directory: backend
+        run: |
+          migration_db="$(mktemp --suffix=.db)"
+          CAMZILLA_DATABASE_URL="sqlite+pysqlite:///$migration_db" uv run alembic upgrade head
+          CAMZILLA_DATABASE_URL="sqlite+pysqlite:///$migration_db" uv run alembic check
+          uv run pytest tests/test_schema_compatibility.py
 
   frontend:
     runs-on: ubuntu-24.04

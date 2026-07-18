@@ -279,3 +279,66 @@ class EventPage(BaseModel):
 class RecordingResponse(BaseModel):
     id: UUID
     status: Literal["recording", "processing"]
+
+
+class BackupCamera(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]+$")
+    name: str
+    enabled: bool
+    allowed_categories: list[str] = Field(min_length=1)
+    catalog_revision: str
+
+
+class BackupAlertRule(BaseModel):
+    id: str
+    camera_id: str
+    enabled: bool
+    target_categories: list[str] = Field(min_length=1)
+    confidence_threshold: float = Field(ge=0, le=1)
+    debounce_seconds: float = Field(ge=1, le=86400)
+    schedule_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    schedule_end: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    zone: PolygonZone | None = None
+
+    @model_validator(mode="after")
+    def valid_schedule(self) -> "BackupAlertRule":
+        if (self.schedule_start is None) != (self.schedule_end is None):
+            raise ValueError("schedule start and end must be provided together")
+        if len(self.target_categories) != len(set(self.target_categories)):
+            raise ValueError("target categories must be unique")
+        return self
+
+
+class BackupDocument(BaseModel):
+    schema_version: Literal["1"] = "1"
+    exported_at: datetime
+    secrets_included: Literal[False] = False
+    active_capability_id: str
+    cameras: list[BackupCamera] = Field(min_length=1)
+    alert_rules: list[BackupAlertRule]
+
+    @model_validator(mode="after")
+    def references_are_consistent(self) -> "BackupDocument":
+        camera_ids = [camera.id for camera in self.cameras]
+        if len(camera_ids) != len(set(camera_ids)):
+            raise ValueError("camera identifiers must be unique")
+        rule_ids = [rule.id for rule in self.alert_rules]
+        if len(rule_ids) != len(set(rule_ids)):
+            raise ValueError("alert rule identifiers must be unique")
+        if any(rule.camera_id not in camera_ids for rule in self.alert_rules):
+            raise ValueError("alert rule references an unknown camera")
+        return self
+
+
+class BackupValidationRequest(BaseModel):
+    document: dict[str, object]
+
+
+class BackupValidationResponse(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+
+
+class BackupRestoreRequest(BaseModel):
+    expected_config_version: int = Field(ge=1)
+    document: BackupDocument

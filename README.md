@@ -178,6 +178,19 @@ inference groundwork uses a shared, size-one-per-camera round-robin scheduler:
 a busy simulated camera can replace only its own stale frame and cannot starve
 a quieter camera. A real second-camera smoke waits for hardware/configuration.
 
+The configuration panel exports a versioned JSON backup and validates a local
+JSON file before enabling restore. Exports contain camera/rule settings and the
+active capability ID, but exclude secret values, secret references, transient
+capability probes, events, and media. Restore uses the current optimistic
+configuration version, preserves existing external-secret bindings, and gives
+new cameras derived `env:` references that must be configured separately.
+
+The equivalent export and validation endpoints are
+`GET /api/v1/backup` and `POST /api/v1/backup/validate`. Use the UI for restore
+so validation and the current version are applied together. Even secret-free
+exports reveal camera names and security rules; store them privately and do
+not attach them to public issues or CI artifacts.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 

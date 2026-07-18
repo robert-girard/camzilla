@@ -31,6 +31,7 @@ from sqlalchemy.pool import StaticPool
 
 from .contracts import (
     AlertRuleConfiguration,
+    BackupDocument,
     CameraConfiguration,
     EventPage,
     EventSummary,
@@ -217,6 +218,72 @@ class Repository:
                     allowed_categories=["person"],
                 )
             )
+            state.version += 1
+            return state.version
+
+    def restore_backup(self, document: BackupDocument, *, expected_config_version: int) -> int:
+        with self.database.session() as session:
+            state = session.get(ConfigState, 1)
+            if state is None:
+                raise RuntimeError("configuration is not initialized")
+            if state.version != expected_config_version:
+                raise ConfigurationConflictError("configuration version conflict")
+            restored_camera_ids = {camera.id for camera in document.cameras}
+            for existing_camera in session.scalars(select(CameraRecord)):
+                if existing_camera.id not in restored_camera_ids:
+                    existing_camera.enabled = False
+                    existing_camera.version += 1
+            for camera in document.cameras:
+                camera_record = session.get(CameraRecord, camera.id)
+                if camera_record is None:
+                    variable = camera.id.upper().replace("-", "_")
+                    camera_record = CameraRecord(
+                        id=camera.id,
+                        name=camera.name,
+                        stream_secret_ref=f"env:CAMZILLA_{variable}_RTSP_URL",
+                        capabilities={"runtime_state": "pending"},
+                        allowed_categories=list(camera.allowed_categories),
+                        catalog_revision=camera.catalog_revision,
+                    )
+                    session.add(camera_record)
+                else:
+                    camera_record.name = camera.name
+                    camera_record.enabled = camera.enabled
+                    camera_record.allowed_categories = list(camera.allowed_categories)
+                    camera_record.catalog_revision = camera.catalog_revision
+                    camera_record.version += 1
+            restored_rule_ids = {rule.id for rule in document.alert_rules}
+            for existing_rule in session.scalars(select(AlertRuleRecord)):
+                if existing_rule.id not in restored_rule_ids:
+                    existing_rule.enabled = False
+                    existing_rule.version += 1
+            for rule in document.alert_rules:
+                rule_record = session.get(AlertRuleRecord, rule.id)
+                zone = [[point.x, point.y] for point in rule.zone.points] if rule.zone else None
+                if rule_record is None:
+                    rule_record = AlertRuleRecord(
+                        id=rule.id,
+                        camera_id=rule.camera_id,
+                        enabled=rule.enabled,
+                        target_categories=list(rule.target_categories),
+                        confidence_threshold=rule.confidence_threshold,
+                        debounce_seconds=rule.debounce_seconds,
+                        schedule_start=rule.schedule_start,
+                        schedule_end=rule.schedule_end,
+                        zone=zone,
+                    )
+                    session.add(rule_record)
+                else:
+                    rule_record.camera_id = rule.camera_id
+                    rule_record.enabled = rule.enabled
+                    rule_record.target_categories = list(rule.target_categories)
+                    rule_record.confidence_threshold = rule.confidence_threshold
+                    rule_record.debounce_seconds = rule.debounce_seconds
+                    rule_record.schedule_start = rule.schedule_start
+                    rule_record.schedule_end = rule.schedule_end
+                    rule_record.zone = zone
+                    rule_record.version += 1
+            state.active_capability_id = document.active_capability_id
             state.version += 1
             return state.version
 

@@ -313,16 +313,17 @@ The system becomes convenient for daily personal use before authentication is in
 - [x] Add manual recording only after retention and disk-full behavior are tested.
 - [x] Generalize orchestration/UI to multiple cameras while sharing or pooling inference workers based on measured memory/throughput.
 - [x] Add optimistic config versioning before multiple authenticated editors exist, so Phase 4 does not retrofit it.
-- [ ] Add backup/export with secrets excluded by default and explicit restore validation.
-- [ ] Unit/integration-test migrations, rules, zones, schedules, retention, disk-full handling, multi-camera fairness, and backup/restore.
+- [x] Add backup/export with secrets excluded by default and explicit restore validation.
+- [x] Unit/integration-test migrations, rules, zones, schedules, retention, disk-full handling, multi-camera fairness, and backup/restore.
 - [x] Add Playwright coverage for history filters, rule editing conflicts/validation, zone drawing, clip playback, and multi-camera degraded states.
+- [x] Extend GitHub Actions with migration checks and schema/API compatibility checks; deployment remains manual.
 
 ### Phase 3 validation evidence
 
 - 2026-07-17: The initial migration, repository, runtime integration, history/config APIs, and selection rollback passed 75 backend tests plus 8 expected opt-in skips. Sixteen deterministic Playwright flows passed, including history filtering/deletion, optimistic conflict handling, schedule/rule editing, normalized zone drawing/preview, and client validation. Schema and API responses contain secret references or redacted capability state only, never secret values or authenticated URLs.
 - 2026-07-17: Media storage, quota retention, pre-roll/post-roll sessions, manual-recording gating, database-reference cleanup, and redacted disk failure behavior passed 83 backend tests plus 8 expected opt-in skips, including a real OpenCV MP4 encode on the development runtime. Seventeen Playwright flows passed with inline clip playback and manual start/stop controls. Tests used synthetic bytes/frames under temporary roots and retained no media.
 - 2026-07-17: Multi-camera persistence/API validation and the bounded round-robin scheduler passed 86 backend tests plus 8 expected opt-in skips. Flooding two simulated sources retained only one latest frame per camera and serviced the quieter source after the busy source's single turn. Eighteen Playwright flows passed, including distinct synthetic/degraded camera cards with only the operational camera exposing recording controls. Real second-camera testing remains hardware-dependent.
-- [ ] Extend GitHub Actions with migration checks and schema/API compatibility checks; deployment remains manual.
+- 2026-07-17: Secret-free backup export, field-redacted validation, optimistic restore, external-secret-reference preservation/derivation, migration drift detection, and OpenAPI secret-surface checks passed 91 backend tests plus 8 expected opt-in skips. Nineteen Playwright flows passed, including file validation before restore. A fresh SQLite upgrade reached `0001_phase3_state`, and `alembic check` reported no new upgrade operations.
 
 ### Exit criteria
 
