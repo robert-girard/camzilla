@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1 complete; Phase 1b in progress (local-first model/inference selection UI; Orange Pi deployment deferred until post-auth Phase 4b)
+Status: Phase 1b implementation complete; GitHub Actions confirmation pending before Phase 2 starts (Orange Pi deployment deferred until post-auth Phase 4b)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -231,21 +231,27 @@ No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence
 
 #### Tests, documentation, and integration gates
 
-- [ ] Unit-test capability/compatibility validation, stable IDs, unavailable reasons, concurrent request serialization, transition state, queue/result reset, successful cleanup, failed warm-up rollback, and redaction.
-- [ ] Integration-test CPU model switching through the running pipeline and deterministic fake capability fixtures for CPU, GPU, NPU, and TPU; keep CUDA/RKNN/TPU hardware tests opt-in with clear skip semantics.
+- [x] Unit-test capability/compatibility validation, stable IDs, unavailable reasons, concurrent request serialization, transition state, queue/result reset, successful cleanup, failed warm-up rollback, and redaction.
+- [x] Integration-test CPU model switching through the running pipeline and deterministic fake capability fixtures for CPU, GPU, NPU, and TPU; keep CUDA/RKNN/TPU hardware tests opt-in with clear skip semantics.
 - [x] Add Playwright flows for a successful model/CPU switch, capability-gated GPU/NPU/TPU choices, switching state, failed-switch rollback, diagnostics identity, stale-overlay expiry, and metadata recovery.
-- [ ] Update the root README with selection behavior, supported combinations, runtime-only semantics, restart defaults, expected interruption, unavailable-target troubleshooting, and hardware-dependent validation commands.
-- [ ] Extend CI to run the selection contract, integration, frontend, and deterministic Playwright tests without requiring model binaries or accelerator hardware.
-- [ ] When Phase 4b adds RKNN, register its verified model artifacts in this capability contract and make NPU choices selectable without changing the Phase 1b API or UI contract.
+- [x] Update the root README with selection behavior, supported combinations, runtime-only semantics, restart defaults, expected interruption, unavailable-target troubleshooting, and hardware-dependent validation commands.
+- [x] Extend CI to run the selection contract, integration, frontend, and deterministic Playwright tests without requiring model binaries or accelerator hardware.
+- [ ] **Phase 4b follow-up (does not block Phase 1b):** register verified RKNN model artifacts in this capability contract and make NPU choices selectable without changing the Phase 1b API or UI contract.
 
 ### Exit criteria
 
-- [ ] The browser can switch among installed, checksum-verified managed YOLO weights on CPU, and the active model identity in health and detection messages matches the confirmed selection.
-- [ ] CUDA GPU is selectable only when verified available; CPU remains usable when CUDA is absent or a GPU switch fails.
-- [ ] CPU, GPU, NPU, and TPU are represented consistently, with unsupported combinations disabled and explained rather than accepted and silently downgraded.
-- [ ] A failed or racing switch cannot leave two active workers, leak a loaded runtime, expose a secret/path, or replace the last healthy backend.
-- [ ] Video remains available during a switch, stale detections are cleared, and metadata/diagnostics recover with the newly confirmed identity.
-- [ ] Backend, frontend, integration, Playwright, build, and security checks pass in hardware-independent CI; accelerator-specific checks have documented opt-in results and skip behavior.
+- [x] The browser can switch among installed, checksum-verified managed YOLO weights on CPU, and the active model identity in health and detection messages matches the confirmed selection.
+- [x] CUDA GPU is selectable only when verified available; CPU remains usable when CUDA is absent or a GPU switch fails.
+- [x] CPU, GPU, NPU, and TPU are represented consistently, with unsupported combinations disabled and explained rather than accepted and silently downgraded.
+- [x] A failed or racing switch cannot leave two active workers, leak a loaded runtime, expose a secret/path, or replace the last healthy backend.
+- [x] Video remains available during a switch, stale detections are cleared, and metadata/diagnostics recover with the newly confirmed identity.
+- [~] Backend, frontend, integration, Playwright, build, and security checks pass in hardware-independent CI; accelerator-specific checks have documented opt-in results and skip behavior. Local CI equivalents pass; GitHub Actions confirmation is pending.
+
+### Phase 1b validation evidence
+
+- 2026-07-17: The running no-camera Ultralytics stack reported all six checksum-verified managed weights as CPU-available and switched transactionally through `yolov8n`, `yolov8s`, `yolov8m`, `yolo11n`, `yolo11s`, and `yolo11m`; each response and health check confirmed CPU identity and ready transition state. After the final switch, synthetic inference resumed near 4.9 FPS with 61 processed frames and zero failures. CUDA was unavailable and all GPU combinations remained disabled with a redacted reason; NPU and TPU placeholders were disabled with their planned-runtime explanations.
+- 2026-07-17: Real Chromium against the running API displayed all target categories and six CPU weights, switched explicitly from YOLO11m to YOLOv8n, cleared the old result, and recovered diagnostics/metadata with the confirmed CPU identity. Deterministic browser coverage passed eight flows, including switching state, failed warm-up rollback, unavailable hardware, stale expiry, metadata recovery, fullscreen, and video fallback. No camera media or browser artifact was retained.
+- 2026-07-17: Local CI equivalents passed with 44 backend tests plus 8 expected opt-in skips, backend format/lint/type checks, 3 frontend unit tests, frontend lint/type/build, 8 Playwright flows, security scanning, Compose configuration, production image builds, and a clean no-camera production-stack readiness smoke.
 
 ## Phase 2 — Complete Tripwire locally on x86 (pre-auth)
 

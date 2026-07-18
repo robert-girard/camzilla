@@ -42,6 +42,40 @@ Inference reads only the local
 `CAMZILLA_INFERENCE_RESTREAM_URL` from `go2rtc`; it does not open another
 physical-camera connection.
 
+### Runtime inference selection
+
+The camera page lists the model/target combinations verified by the API. CPU,
+GPU, NPU, and TPU are stable target categories, but only installed,
+checksum-verified artifacts with a healthy runtime can be selected. The local
+x86 implementation supports all six managed weights on CPU and enables their
+GPU choices only when CUDA is available. RKNN NPU is delivered in post-auth
+Phase 4b; TPU remains unavailable until a concrete adapter is implemented.
+
+Choose one available combination and use **Apply inference selection**. Video
+remains independent while the candidate model loads and warms. Detection intake
+pauses, stale results are cleared, and the old backend remains active if the
+switch fails. A successful response updates health, diagnostics, and detection
+metadata with the confirmed model and target. The choice is global and
+runtime-only through Phase 2: restarting the API restores the `.env` default.
+The browser never accepts a model path, remote URL, or arbitrary backend name.
+
+The same allowlisted operation can be inspected or exercised locally through
+the typed API without displaying paths or secrets:
+
+```sh
+curl --fail http://127.0.0.1:8000/api/v1/inference
+curl --fail --request PUT \
+  --header 'content-type: application/json' \
+  --data '{"capability_id":"ultralytics:yolo11s:cpu"}' \
+  http://127.0.0.1:8000/api/v1/inference/selection
+```
+
+If a model is reported as not installed, run
+`python3 scripts/download-model.py <model-id>` on the host and restart the API
+so startup re-verifies the manifest checksum. An unavailable GPU indicates that
+the server has not verified a CUDA device/runtime; Camzilla does not silently
+downgrade a browser-requested GPU switch to CPU.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 
