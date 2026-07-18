@@ -313,7 +313,7 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 - [x] Replaced the tracked camera IP/MAC and helper defaults with environment-driven configuration in the current working tree.
 - [x] Verified the physical ONVIF and RTSP services were reachable and an authenticated H.264 pipeline processed the stream without printing credentials.
 - [x] Commit the sanitized current state locally.
-- [ ] Push the sanitized current state to GitHub.
+- [x] Push the sanitized current state to GitHub.
 - [ ] Decide whether to rewrite old public history after reviewing the risk and coordination cost; do not force-push without explicit approval.
 
 ## Open decisions and discovery gates
@@ -321,7 +321,7 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 - [ ] Choose the repository copyright holder/notice for the AGPL-3.0 license.
 - [ ] Confirm dev machine OS, CPU/GPU/CUDA availability, RAM, and expected browsers.
 - [ ] Confirm Orange Pi OS image, NPU driver/runtime state, RAM, storage, and whether it is available during Phase 2.
-- [ ] Measure `PROFILE_001` and decide whether inference uses the substream or a downscaled main-stream restream.
+- [x] Measure `PROFILE_001` and decide whether inference uses the substream or a downscaled main-stream restream.
 - [ ] Set numeric Phase 1 targets after the first baseline: acceptable view latency, detection age, inference FPS, and CPU/GPU usage.
 - [ ] Decide later whether snapshots/events may be retained by default; use memory-only behavior through Phase 2.
 
