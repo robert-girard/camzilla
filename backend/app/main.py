@@ -31,16 +31,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.worker = DetectionWorker(
         backend, settings.class_filter, settings.confidence_threshold, hub.publish
     )
-    pipeline = InferencePipeline(app.state.worker)
     # The physical-camera URL is only supplied to go2rtc. Inference consumes its
     # local restream; no-camera development/CI remains deterministic.
-    source = (
-        OpenCvRestreamSource(settings.inference_restream_url, settings.inference_fps).frames()
-        if settings.camera_rtsp_url
-        else SyntheticFrameSource(
+    if settings.camera_rtsp_url:
+        restream_source = OpenCvRestreamSource(
+            settings.inference_restream_url, settings.inference_fps
+        )
+        source = restream_source.frames()
+        pipeline = InferencePipeline(
+            app.state.worker, source_dropped_frames=lambda: restream_source.dropped_frames
+        )
+    else:
+        source = SyntheticFrameSource(
             settings.inference_fps, decoded_image=settings.inference_backend == "ultralytics"
         ).frames()
-    )
+        pipeline = InferencePipeline(app.state.worker)
     await pipeline.start(source)
     app.state.pipeline = pipeline
     heartbeat = asyncio.create_task(hub.heartbeat())

@@ -22,7 +22,7 @@ async def test_pipeline_drops_superseded_frames_when_inference_is_slow() -> None
     backend = SlowFake()
     await backend.load()
     worker = DetectionWorker(backend, frozenset({"person"}), 0.5, publish)
-    pipeline = InferencePipeline(worker)
+    pipeline = InferencePipeline(worker, source_dropped_frames=lambda: 2)
 
     async def source():
         for _ in range(5):
@@ -31,7 +31,8 @@ async def test_pipeline_drops_superseded_frames_when_inference_is_slow() -> None
     await pipeline.start(source())
     await asyncio.sleep(0.06)
     await pipeline.close()
-    assert pipeline.dropped_frames >= 3
+    assert pipeline.queue.dropped >= 3
+    assert pipeline.dropped_frames == pipeline.queue.dropped + 2
     assert worker.processed_frames < 5
     assert messages
 

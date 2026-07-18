@@ -53,7 +53,7 @@ The system is built around three interfaces so that no single vendor, protocol, 
 
 - `go2rtc` owns one authenticated upstream RTSP connection to the physical camera and exposes internal restreams to the browser and frame sampler.
 - FastAPI owns public application contracts, sanitized stream descriptors, health, and detection WebSockets. Camera URLs and `go2rtc` administrative APIs are never browser-facing.
-- Viewer frames run at the available stream rate. Inference samples independently through a bounded latest-frame queue so slow inference drops superseded frames instead of increasing latency.
+- Viewer frames run at the available stream rate. The inference restream decoder is drained continuously while the sampler submits only the newest frame at its configured rate; decoder-discarded and queue-superseded frames are counted as drops so slow inference cannot increase latency invisibly.
 
 ## 4. Video Streaming to Browser
 
@@ -73,7 +73,7 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
 - FastAPI async tasks handle API/WebSocket I/O and orchestration; CPU/NPU-bound decode and inference must not block the event loop.
 - Use an explicitly started inference service/worker with one loaded backend and a bounded input queue. Do not fork after loading CUDA or RKNN state, and do not assume a model copy per camera will scale on constrained hardware.
 - Phase 1 begins with one camera and one inference worker. Multi-camera work adds a measured scheduler or configurable worker pool only after memory, decode, throughput, and fairness measurements.
-- The frame sampler submits at a configured target rate. A size-one or small bounded queue uses latest-frame-wins semantics and exposes processed, dropped, failed, and latency metrics.
+- The frame sampler submits at a configured target rate. It must keep draining the source between samples rather than sleeping between decoder reads, because decoder-internal buffering would otherwise bypass latest-frame-wins semantics. A size-one or small bounded queue exposes processed, dropped, failed, and latency metrics.
 - Service/process shutdown must close streams and runtimes explicitly. RKNN initialization/shutdown behavior is validated on the Orange Pi rather than inferred from x86 behavior.
 
 ## 6. Detection Model Notes

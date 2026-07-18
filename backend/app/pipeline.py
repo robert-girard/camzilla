@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
+from typing import Any
 
 from .inference import DetectionWorker, Frame
 from .queueing import LatestItemQueue, consume_latest
@@ -40,44 +41,68 @@ class SyntheticFrameSource:
 class OpenCvRestreamSource:
     """Decode only go2rtc's local restream, never the physical camera URL."""
 
-    def __init__(self, restream_url: str, fps: float) -> None:
+    def __init__(
+        self,
+        restream_url: str,
+        fps: float,
+        capture_factory: Callable[[str], Any] | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self.restream_url = restream_url
         self.interval = 1 / fps
+        self.capture_factory = capture_factory
+        self.clock = clock
+        self.dropped_frames = 0
 
     async def frames(self) -> AsyncIterator[Frame]:
-        try:
-            import cv2
-        except ImportError as error:
-            raise RuntimeError(
-                "restream decoding requires the Ultralytics runtime extra"
-            ) from error
-        capture = await asyncio.to_thread(cv2.VideoCapture, self.restream_url)
+        capture_factory = self.capture_factory
+        if capture_factory is None:
+            try:
+                import cv2
+            except ImportError as error:
+                raise RuntimeError(
+                    "restream decoding requires the Ultralytics runtime extra"
+                ) from error
+            capture_factory = cv2.VideoCapture
+        capture = await asyncio.to_thread(capture_factory, self.restream_url)
         if not capture.isOpened():
             capture.release()
             raise RuntimeError("local video restream is unavailable")
+        clock = self.clock or asyncio.get_running_loop().time
+        next_sample_at = clock()
         try:
             while True:
-                ok, image = await asyncio.to_thread(capture.read)
+                ok = await asyncio.to_thread(capture.grab)
+                if not ok:
+                    raise RuntimeError("local video restream ended")
+                now = clock()
+                if now < next_sample_at:
+                    self.dropped_frames += 1
+                    continue
+                ok, image = await asyncio.to_thread(capture.retrieve)
                 if not ok:
                     raise RuntimeError("local video restream ended")
                 height, width = image.shape[:2]
                 yield Frame(width, height, datetime.now(UTC), image)
-                await asyncio.sleep(self.interval)
+                next_sample_at = now + self.interval
         finally:
             await asyncio.to_thread(capture.release)
 
 
 class InferencePipeline:
-    def __init__(self, worker: DetectionWorker) -> None:
+    def __init__(
+        self, worker: DetectionWorker, source_dropped_frames: Callable[[], int] | None = None
+    ) -> None:
         self.worker = worker
         self.queue: LatestItemQueue[Frame] = LatestItemQueue()
+        self.source_dropped_frames = source_dropped_frames or (lambda: 0)
         self._consumer: asyncio.Task[None] | None = None
         self._producer: asyncio.Task[None] | None = None
         self.source_error: str | None = None
 
     @property
     def dropped_frames(self) -> int:
-        return self.queue.dropped
+        return self.source_dropped_frames() + self.queue.dropped
 
     async def start(self, source: AsyncIterator[Frame]) -> None:
         self._consumer = asyncio.create_task(consume_latest(self.queue, self.worker.process))
