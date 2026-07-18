@@ -138,6 +138,8 @@ export type EventPage = {
   pages: number
 }
 
+export type RecordingResponse = { id: string; status: 'recording' | 'processing' }
+
 export type InferenceTarget = 'cpu' | 'gpu' | 'npu' | 'tpu'
 
 export type InferenceCapability = {

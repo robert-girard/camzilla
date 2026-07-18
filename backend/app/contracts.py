@@ -267,3 +267,8 @@ class EventPage(BaseModel):
     page_size: int
     total: int
     pages: int
+
+
+class RecordingResponse(BaseModel):
+    id: UUID
+    status: Literal["recording", "processing"]

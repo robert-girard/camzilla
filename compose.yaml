@@ -11,6 +11,7 @@ services:
       CAMZILLA_INFERENCE_BACKEND: ${CAMZILLA_INFERENCE_BACKEND:-fake}
       CAMZILLA_CAMERA_RTSP_URL: ${CAMZILLA_CAMERA_RTSP_URL:-}
       CAMZILLA_DATABASE_URL: ${CAMZILLA_DATABASE_URL:-sqlite+pysqlite:////data/camzilla.db}
+      CAMZILLA_MEDIA_ENABLED: ${CAMZILLA_MEDIA_ENABLED:-true}
       CAMZILLA_MEDIA_ROOT: ${CAMZILLA_MEDIA_ROOT:-/media}
     volumes:
       - ./models:/models:ro

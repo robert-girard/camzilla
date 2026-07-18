@@ -41,8 +41,11 @@ class Settings(BaseSettings):
     stream_down_alerts_enabled: bool = True
     stream_down_repeat_seconds: float = Field(default=3600, ge=60, le=86400)
     database_url: str = "sqlite+pysqlite:///:memory:"
+    media_enabled: bool = False
     media_root: str = "/media"
     media_quota_bytes: int = Field(default=5 * 1024 * 1024 * 1024, ge=1024 * 1024)
+    clip_duration_seconds: float = Field(default=10, ge=5, le=30)
+    clip_pre_roll_seconds: float = Field(default=2, ge=0, le=10)
     timezone: str = "UTC"
 
     @field_validator("inference_backend")

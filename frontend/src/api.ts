@@ -4,6 +4,7 @@ import type {
   AlertRuleUpdate,
   EventPage,
   GlobalConfiguration,
+  RecordingResponse,
   HealthStatus,
   PtzCapability,
   PtzDirection,
@@ -111,4 +112,20 @@ export async function getEvents(options: {
 export async function deleteEvent(eventId: string): Promise<void> {
   const response = await fetch(`/api/v1/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' })
   if (!response.ok) throw await responseError(response, 'event deletion failed')
+}
+
+export async function startRecording(cameraId: string): Promise<RecordingResponse> {
+  const response = await fetch(`/api/v1/cameras/${encodeURIComponent(cameraId)}/recordings`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw await responseError(response, 'recording could not start')
+  return response.json() as Promise<RecordingResponse>
+}
+
+export async function stopRecording(recordingId: string): Promise<RecordingResponse> {
+  const response = await fetch(`/api/v1/recordings/${encodeURIComponent(recordingId)}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) throw await responseError(response, 'recording could not stop')
+  return response.json() as Promise<RecordingResponse>
 }

@@ -33,6 +33,9 @@ function inferenceState() {
 }
 
 async function installMocks(page: Page, options: MockOptions = {}) {
+  await page.route('**/api/v1/events/*/clip', (route) => route.fulfill({
+    status: 200, contentType: 'video/mp4', body: 'fixture clip',
+  }))
   await page.addInitScript(({ message, settings, inferenceState }) => {
     const sockets: MockSocket[] = []
     const inference = inferenceState
@@ -87,7 +90,7 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       id: '11111111-1111-4111-8111-111111111111', camera_id: 'front-door',
       rule_id: 'person-detected', event_type: 'detection',
       triggered_at: new Date().toISOString(), categories: ['person'],
-      has_snapshot: false, has_clip: false,
+      has_snapshot: false, has_clip: true,
     }]
     const health = { status: 'ready', camera: 'not_configured', inference: 'ready' }
     Object.defineProperty(window, '__camzillaSetHealth', {
@@ -195,7 +198,18 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       if (url.includes('/api/v1/config')) {
         return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
       }
+      if (url.includes('/api/v1/cameras/front-door/recordings')) {
+        return new Response(JSON.stringify({
+          id: '22222222-2222-4222-8222-222222222222', status: 'recording',
+        }), { status: 201, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/recordings/')) {
+        return new Response(JSON.stringify({
+          id: '22222222-2222-4222-8222-222222222222', status: 'processing',
+        }), { headers: { 'content-type': 'application/json' } })
+      }
       if (url.includes('/api/v1/events/')) {
+        if (url.endsWith('/clip')) return new Response('fixture clip', { headers: { 'content-type': 'video/mp4' } })
         const eventId = url.split('/').at(-1)
         events = events.filter((item) => item.id !== eventId)
         return new Response(null, { status: 204 })
@@ -375,11 +389,24 @@ test('filters and deletes persistent alert history', async ({ page }) => {
   await page.goto('/')
   const history = page.getByRole('region', { name: 'Configuration and alert history' })
   await expect(history).toContainText('detection')
+  await expect(history.getByLabel('Clip from front-door')).toHaveAttribute(
+    'src', '/api/v1/events/11111111-1111-4111-8111-111111111111/clip',
+  )
   await history.getByLabel('Event type').selectOption('stream-down')
   await expect(history).toContainText('No alert events match this filter.')
   await history.getByLabel('Event type').selectOption('')
   await history.getByRole('button', { name: 'Delete' }).click()
   await expect(history).toContainText('No alert events match this filter.')
+})
+
+test('starts and stops one manual recording from the camera card', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  await history.getByRole('button', { name: 'Start recording' }).click()
+  await expect(history.getByText('Manual recording started')).toBeVisible()
+  await history.getByRole('button', { name: 'Stop recording' }).click()
+  await expect(history.getByText('Recording is processing')).toBeVisible()
 })
 
 test('edits rule values and draws a normalized zone', async ({ page }) => {

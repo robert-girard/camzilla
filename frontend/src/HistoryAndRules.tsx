@@ -1,6 +1,13 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 
-import { deleteEvent, getConfiguration, getEvents, updateAlertRule } from './api'
+import {
+  deleteEvent,
+  getConfiguration,
+  getEvents,
+  startRecording,
+  stopRecording,
+  updateAlertRule,
+} from './api'
 import type { AlertRuleConfiguration, EventPage, GlobalConfiguration, ZonePoint } from './types'
 
 type RuleDraft = {
@@ -33,6 +40,7 @@ export function HistoryAndRules() {
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
   const [saving, setSaving] = useState(false)
+  const [recordingId, setRecordingId] = useState<string>()
 
   useEffect(() => {
     void getConfiguration()
@@ -102,6 +110,23 @@ export function HistoryAndRules() {
     }
   }
 
+  const toggleRecording = async (cameraId: string) => {
+    setError(undefined)
+    try {
+      if (recordingId) {
+        await stopRecording(recordingId)
+        setRecordingId(undefined)
+        setNotice('Recording is processing')
+      } else {
+        const recording = await startRecording(cameraId)
+        setRecordingId(recording.id)
+        setNotice('Manual recording started')
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'recording request failed')
+    }
+  }
+
   const rule = configuration?.alert_rules[0]
   const polygon = draft?.zone.map((point) => `${point.x * 100},${point.y * 100}`).join(' ')
 
@@ -113,6 +138,9 @@ export function HistoryAndRules() {
           <article key={camera.id}>
             <h3>{camera.name}</h3>
             <span>{camera.enabled ? 'enabled' : 'disabled'}</span>
+            <button type="button" onClick={() => void toggleRecording(camera.id)}>
+              {recordingId ? 'Stop recording' : 'Start recording'}
+            </button>
           </article>
         ))}
       </div>
@@ -150,7 +178,7 @@ export function HistoryAndRules() {
         <table><thead><tr><th>Time</th><th>Camera</th><th>Type</th><th>Categories</th><th>Media</th><th /></tr></thead>
           <tbody>{events?.items.map((item) => <tr key={item.id}>
             <td>{new Date(item.triggered_at).toLocaleString()}</td><td>{item.camera_id}</td><td>{item.event_type}</td><td>{item.categories.join(', ')}</td>
-            <td>{item.has_snapshot ? <a href={`/api/v1/events/${item.id}/snapshot`}>Snapshot</a> : '—'} {item.has_clip && <a href={`/api/v1/events/${item.id}/clip`}>Clip</a>}</td>
+            <td>{item.has_snapshot ? <a href={`/api/v1/events/${item.id}/snapshot`}>Snapshot</a> : '—'} {item.has_clip && <video aria-label={`Clip from ${item.camera_id}`} controls preload="metadata" src={`/api/v1/events/${item.id}/clip`} />}</td>
             <td><button type="button" onClick={() => void removeEvent(item.id)}>Delete</button></td>
           </tr>)}</tbody>
         </table>

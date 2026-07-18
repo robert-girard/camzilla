@@ -307,10 +307,10 @@ The system becomes convenient for daily personal use before authentication is in
 - [x] Implement SQLite persistence through SQLAlchemy 2 with Alembic migrations for the single-node deployment; keep media outside database rows and avoid SQLite database files on network filesystems.
 - [x] Persist cameras, capability results, the active inference backend/model/target selection, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
 - [x] Keep the persistence/domain boundary compatible with a later PostgreSQL adapter and document the operational conditions that justify migration (multiple app instances, shared/remote database, or sustained write contention).
-- [~] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion; metadata/API/UI are complete, while media access awaits the clip/retention slice.
+- [x] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion.
 - [x] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
-- [ ] Add pre-roll ring buffering and configurable 5–30 second alert clips with storage quotas and oldest-first retention.
-- [ ] Add manual recording only after retention and disk-full behavior are tested.
+- [x] Add pre-roll ring buffering and configurable 5–30 second alert clips with storage quotas and oldest-first retention.
+- [x] Add manual recording only after retention and disk-full behavior are tested.
 - [ ] Generalize orchestration/UI to multiple cameras while sharing or pooling inference workers based on measured memory/throughput.
 - [x] Add optimistic config versioning before multiple authenticated editors exist, so Phase 4 does not retrofit it.
 - [ ] Add backup/export with secrets excluded by default and explicit restore validation.
@@ -320,6 +320,7 @@ The system becomes convenient for daily personal use before authentication is in
 ### Phase 3 validation evidence
 
 - 2026-07-17: The initial migration, repository, runtime integration, history/config APIs, and selection rollback passed 75 backend tests plus 8 expected opt-in skips. Sixteen deterministic Playwright flows passed, including history filtering/deletion, optimistic conflict handling, schedule/rule editing, normalized zone drawing/preview, and client validation. Schema and API responses contain secret references or redacted capability state only, never secret values or authenticated URLs.
+- 2026-07-17: Media storage, quota retention, pre-roll/post-roll sessions, manual-recording gating, database-reference cleanup, and redacted disk failure behavior passed 83 backend tests plus 8 expected opt-in skips, including a real OpenCV MP4 encode on the development runtime. Seventeen Playwright flows passed with inline clip playback and manual start/stop controls. Tests used synthetic bytes/frames under temporary roots and retained no media.
 - [ ] Extend GitHub Actions with migration checks and schema/API compatibility checks; deployment remains manual.
 
 ### Exit criteria

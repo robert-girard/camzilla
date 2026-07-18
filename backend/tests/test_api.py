@@ -4,6 +4,7 @@ from uuid import uuid4
 import httpx
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.contracts import PtzCapabilityResponse
 from app.main import app
 from app.ptz import PtzService
@@ -205,6 +206,63 @@ def test_event_history_paginates_filters_sorts_and_deletes() -> None:
     assert category.json()["items"][0]["event_type"] == "stream-down"
     assert removed.status_code == 204
     assert missing.status_code == 404
+
+
+def test_media_and_manual_recording_are_gated_when_storage_is_disabled() -> None:
+    event_id = uuid4()
+    with TestClient(app) as client:
+        start = client.post("/api/v1/cameras/front-door/recordings")
+        snapshot = client.get(f"/api/v1/events/{event_id}/snapshot")
+        stop = client.delete(f"/api/v1/recordings/{event_id}")
+        health = client.get("/health/ready")
+    assert start.status_code == 409
+    assert start.json() == {"detail": "media recording is disabled"}
+    assert snapshot.status_code == 404
+    assert stop.status_code == 404
+    assert health.json()["media"] == {
+        "enabled": False,
+        "failures": 0,
+        "recording_sessions": 0,
+    }
+
+
+def test_enabled_media_serves_deletes_and_gates_manual_recording(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        _env_file=None,
+        media_enabled=True,
+        media_root=str(tmp_path / "media"),
+        media_quota_bytes=1024 * 1024,
+        database_url=f"sqlite+pysqlite:///{tmp_path / 'camzilla.db'}",
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    event_id = str(uuid4())
+    with TestClient(app) as client:
+        store = app.state.media_store
+        stored = store.save_snapshot("front-door", event_id, b"jpeg fixture")
+        app.state.repository.record_event(
+            event_id=event_id,
+            camera_id="front-door",
+            rule_id="person-detected",
+            event_type="detection",
+            triggered_at=datetime.now(UTC),
+            categories=["person"],
+            snapshot_path=stored.path,
+        )
+        snapshot = client.get(f"/api/v1/events/{event_id}/snapshot")
+        started = client.post("/api/v1/cameras/front-door/recordings")
+        duplicate = client.post("/api/v1/cameras/front-door/recordings")
+        stopped = client.delete(f"/api/v1/recordings/{started.json()['id']}")
+        removed = client.delete(f"/api/v1/events/{event_id}")
+        missing = client.get(f"/api/v1/events/{event_id}/snapshot")
+    assert snapshot.status_code == 200
+    assert snapshot.content == b"jpeg fixture"
+    assert snapshot.headers["content-type"].startswith("image/jpeg")
+    assert started.status_code == 201 and started.json()["status"] == "recording"
+    assert duplicate.status_code == 409
+    assert stopped.status_code == 200 and stopped.json()["status"] == "processing"
+    assert removed.status_code == 204
+    assert missing.status_code == 404
+    assert not (tmp_path / "media" / "front-door" / f"{event_id}.jpg").exists()
 
 
 def test_ptz_endpoint_uses_bounded_request_and_redacts_adapter_failure() -> None:

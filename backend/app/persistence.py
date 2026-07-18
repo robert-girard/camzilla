@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 from typing import Any
 from uuid import UUID
 
@@ -113,6 +114,7 @@ class Database:
             arguments["poolclass"] = StaticPool
         self.engine: Engine = create_engine(url, **arguments)
         self._sessions = sessionmaker(self.engine, expire_on_commit=False)
+        self._session_lock = RLock()
 
     def migrate(self) -> None:
         if ":memory:" in self.url:
@@ -127,13 +129,14 @@ class Database:
 
     @contextmanager
     def session(self) -> Iterator[Session]:
-        with self._sessions() as session:
-            try:
-                yield session
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
+        with self._session_lock:
+            with self._sessions() as session:
+                try:
+                    yield session
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
 
     def close(self) -> None:
         self.engine.dispose()
@@ -355,3 +358,42 @@ class Repository:
             paths = (event.snapshot_path, event.clip_path)
             session.execute(delete(EventRecord).where(EventRecord.id == event_id))
             return paths
+
+    def update_event_media(
+        self,
+        event_id: str,
+        *,
+        snapshot_path: str | None = None,
+        clip_path: str | None = None,
+    ) -> None:
+        with self.database.session() as session:
+            event = session.get(EventRecord, event_id)
+            if event is None:
+                raise KeyError(event_id)
+            if snapshot_path is not None:
+                event.snapshot_path = snapshot_path
+            if clip_path is not None:
+                event.clip_path = clip_path
+
+    def clear_media_paths(self, removed_paths: tuple[str, ...]) -> None:
+        if not removed_paths:
+            return
+        removed = set(removed_paths)
+        with self.database.session() as session:
+            events = session.scalars(
+                select(EventRecord).where(
+                    (EventRecord.snapshot_path.in_(removed)) | (EventRecord.clip_path.in_(removed))
+                )
+            )
+            for event in events:
+                if event.snapshot_path in removed:
+                    event.snapshot_path = None
+                if event.clip_path in removed:
+                    event.clip_path = None
+
+    def event_media_path(self, event_id: str, kind: str) -> str | None:
+        with self.database.session() as session:
+            event = session.get(EventRecord, event_id)
+            if event is None:
+                raise KeyError(event_id)
+            return event.snapshot_path if kind == "snapshot" else event.clip_path

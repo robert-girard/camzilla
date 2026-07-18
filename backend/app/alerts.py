@@ -34,6 +34,7 @@ class Notifier(Protocol):
 
 
 EventSink = Callable[[AlertPayload], Coroutine[Any, Any, None]]
+FrameObserver = Callable[[Frame], None]
 
 
 class NotifierDeliveryError(Exception):
@@ -207,6 +208,7 @@ class AlertEngine:
         stream_down_repeat_seconds: float = 3600,
         event_sink: EventSink | None = None,
         wall_clock: Callable[[], datetime] | None = None,
+        frame_observer: FrameObserver | None = None,
     ) -> None:
         self.rule = rule
         self.notifier = notifier
@@ -219,6 +221,7 @@ class AlertEngine:
         self.stream_down_repeat_seconds = stream_down_repeat_seconds
         self.event_sink = event_sink
         self.wall_clock = wall_clock or (lambda: datetime.now(UTC))
+        self.frame_observer = frame_observer
         self.queue: asyncio.Queue[AlertCandidate] = asyncio.Queue(maxsize=1)
         self._delivery_task: asyncio.Task[None] | None = None
         self._last_trigger_at: float | None = None
@@ -240,6 +243,11 @@ class AlertEngine:
         self._delivery_task = asyncio.create_task(self._deliver())
 
     def observe(self, frame: Frame, message: DetectionMessage) -> None:
+        if self.frame_observer:
+            try:
+                self.frame_observer(frame)
+            except Exception:
+                pass
         if not self.rule.enabled or message.detections == [] or not self._schedule_active():
             return
         matched = [
@@ -425,7 +433,11 @@ class AlertEngine:
                 await self._delivery_task
 
 
-def build_alert_engine(settings: Settings, event_sink: EventSink | None = None) -> AlertEngine:
+def build_alert_engine(
+    settings: Settings,
+    event_sink: EventSink | None = None,
+    frame_observer: FrameObserver | None = None,
+) -> AlertEngine:
     rule = AlertRule(
         id="person-detected",
         camera_name=settings.camera_name,
@@ -464,4 +476,5 @@ def build_alert_engine(settings: Settings, event_sink: EventSink | None = None) 
         stream_down_repeat_seconds=settings.stream_down_repeat_seconds,
         event_sink=event_sink,
         wall_clock=lambda: datetime.now(ZoneInfo(settings.timezone)),
+        frame_observer=frame_observer,
     )

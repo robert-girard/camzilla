@@ -104,3 +104,9 @@ def test_event_metadata_persists_without_media_blobs(repository) -> None:
     columns = {item["name"] for item in inspect(repository.database.engine).get_columns("events")}
     assert "data" not in columns
     assert "blob" not in columns
+
+    repository.update_event_media(event_id, clip_path="front-door/example.mp4")
+    assert repository.event_media_path(event_id, "clip") == "front-door/example.mp4"
+    repository.clear_media_paths(("front-door/example.jpg",))
+    assert repository.event_media_path(event_id, "snapshot") is None
+    assert repository.event_media_path(event_id, "clip") == "front-door/example.mp4"

@@ -2,12 +2,14 @@ import asyncio
 import importlib.util
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from .alerts import AlertEngine, build_alert_engine
 from .config import Settings, get_settings
@@ -23,9 +25,11 @@ from .contracts import (
     PtzCapabilityResponse,
     PtzMoveRequest,
     PtzMoveResponse,
+    RecordingResponse,
     StreamDescriptor,
 )
 from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
+from .media import ClipRecorder, MediaStorageError, MediaStore, StoredMedia
 from .model_registry import ModelRegistry
 from .persistence import ConfigurationConflictError, Database, Repository
 from .pipeline import (
@@ -95,6 +99,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(repository.seed, settings.camera_name, active_id)
     app.state.database = database
     app.state.repository = repository
+    app.state.media_failures = 0
+    media_store: MediaStore | None = None
+    clip_recorder: ClipRecorder | None = None
+
+    async def clip_complete(event_id: str, stored: StoredMedia) -> None:
+        await asyncio.to_thread(repository.update_event_media, event_id, clip_path=stored.path)
+        await asyncio.to_thread(repository.clear_media_paths, stored.removed_paths)
+
+    async def clip_failed(_event_id: str) -> None:
+        app.state.media_failures += 1
+
+    if settings.media_enabled:
+        media_store = MediaStore(Path(settings.media_root), settings.media_quota_bytes)
+        clip_recorder = ClipRecorder(
+            media_store,
+            fps=settings.inference_fps,
+            duration_seconds=settings.clip_duration_seconds,
+            pre_roll_seconds=settings.clip_pre_roll_seconds,
+            on_complete=clip_complete,
+            on_failed=clip_failed,
+        )
+    app.state.media_store = media_store
+    app.state.clip_recorder = clip_recorder
 
     async def persist_event(payload: AlertPayload) -> None:
         event_type = (
@@ -102,6 +129,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if payload.event.rule_id != "stream-state"
             else next(iter(payload.event.matched_classes), "stream-state")
         )
+        snapshot_path = None
+        if media_store is not None and payload.attachments:
+            try:
+                stored = await asyncio.to_thread(
+                    media_store.save_snapshot,
+                    payload.event.camera_name,
+                    str(payload.event.id),
+                    payload.attachments[0].data,
+                )
+                snapshot_path = stored.path
+                await asyncio.to_thread(repository.clear_media_paths, stored.removed_paths)
+            except MediaStorageError:
+                app.state.media_failures += 1
         await asyncio.to_thread(
             repository.record_event,
             event_id=str(payload.event.id),
@@ -110,11 +150,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             event_type=event_type,
             triggered_at=payload.event.triggered_at,
             categories=sorted(payload.event.matched_classes),
+            snapshot_path=snapshot_path,
         )
+        if event_type == "detection" and clip_recorder is not None:
+            clip_recorder.trigger(str(payload.event.id), payload.event.camera_name)
 
     hub = DetectionHub()
     app.state.hub = hub
-    alert_engine = build_alert_engine(settings, event_sink=persist_event)
+    alert_engine = build_alert_engine(
+        settings,
+        event_sink=persist_event,
+        frame_observer=clip_recorder.observe if clip_recorder else None,
+    )
     persisted_configuration = await asyncio.to_thread(repository.configuration)
     persisted_rule = next(
         item for item in persisted_configuration.alert_rules if item.id == "person-detected"
@@ -230,6 +277,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await heartbeat
         await pipeline.close()
         await alert_engine.close()
+        if clip_recorder:
+            await clip_recorder.close()
         await app.state.worker.backend.close()
         database.close()
 
@@ -283,6 +332,13 @@ async def ready() -> dict[str, object]:
         },
         "websocket_clients": app.state.hub.clients,
         "alerts": alert_status.model_dump(mode="json"),
+        "media": {
+            "enabled": app.state.media_store is not None,
+            "failures": app.state.media_failures,
+            "recording_sessions": (
+                len(app.state.clip_recorder.sessions) if app.state.clip_recorder else 0
+            ),
+        },
         "metrics": {
             "processed_frames": worker.processed_frames,
             "failed_frames": worker.failed_frames,
@@ -377,7 +433,71 @@ async def delete_event(event_id: UUID) -> Response:
     removed = await asyncio.to_thread(repository.delete_event, str(event_id))
     if removed is None:
         raise HTTPException(status_code=404, detail="event not found")
+    media_store: MediaStore | None = app.state.media_store
+    if media_store:
+        await asyncio.to_thread(media_store.delete, removed)
     return Response(status_code=204)
+
+
+@app.get("/api/v1/events/{event_id}/{kind}")
+async def event_media(event_id: UUID, kind: Literal["snapshot", "clip"]) -> FileResponse:
+    repository: Repository = app.state.repository
+    media_store: MediaStore | None = app.state.media_store
+    if media_store is None:
+        raise HTTPException(status_code=404, detail="media not found")
+    try:
+        relative = await asyncio.to_thread(repository.event_media_path, str(event_id), kind)
+        if relative is None:
+            raise FileNotFoundError
+        path = await asyncio.to_thread(media_store.resolve, relative)
+    except (KeyError, FileNotFoundError) as error:
+        raise HTTPException(status_code=404, detail="media not found") from error
+    return FileResponse(
+        path,
+        media_type="image/jpeg" if kind == "snapshot" else "video/mp4",
+        filename=path.name,
+    )
+
+
+@app.post(
+    "/api/v1/cameras/{camera_name}/recordings",
+    response_model=RecordingResponse,
+    status_code=201,
+)
+async def start_manual_recording(camera_name: str) -> RecordingResponse:
+    settings = get_settings()
+    recorder: ClipRecorder | None = app.state.clip_recorder
+    if camera_name != settings.camera_name:
+        raise HTTPException(status_code=404, detail="camera not found")
+    if recorder is None:
+        raise HTTPException(status_code=409, detail="media recording is disabled")
+    event_id = uuid4()
+    try:
+        recorder.start_manual(str(event_id), camera_name)
+    except MediaStorageError as error:
+        raise HTTPException(status_code=409, detail="manual recording is already active") from error
+    repository: Repository = app.state.repository
+    await asyncio.to_thread(
+        repository.record_event,
+        event_id=str(event_id),
+        camera_id=camera_name,
+        rule_id=None,
+        event_type="manual-recording",
+        triggered_at=datetime.now(UTC),
+        categories=[],
+    )
+    return RecordingResponse(id=event_id, status="recording")
+
+
+@app.delete(
+    "/api/v1/recordings/{event_id}",
+    response_model=RecordingResponse,
+)
+async def stop_manual_recording(event_id: UUID) -> RecordingResponse:
+    recorder: ClipRecorder | None = app.state.clip_recorder
+    if recorder is None or not recorder.stop_manual(str(event_id)):
+        raise HTTPException(status_code=404, detail="recording not found")
+    return RecordingResponse(id=event_id, status="processing")
 
 
 @app.get("/api/v1/inference", response_model=InferenceCapabilitiesResponse)

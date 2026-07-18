@@ -156,6 +156,21 @@ appropriate only for multiple application instances, a shared/remote database,
 or measured sustained write contention; changing the URL alone is not yet a
 supported migration procedure.
 
+Media persistence is enabled in production Compose and disabled in the
+camera-free host test default. Detection events save an annotated JPEG and use
+a bounded in-memory pre-roll ring to produce a configurable 5–30 second MP4.
+`CAMZILLA_CLIP_PRE_ROLL_SECONDS` is part of that total duration. The history
+table exposes snapshots and inline clip playback; deleting an event also
+deletes its media. Manual recording uses **Start recording** / **Stop
+recording** on the camera card and the same encoder and retention policy.
+
+`CAMZILLA_MEDIA_QUOTA_BYTES` is a hard local quota. After each atomic media
+write, Camzilla removes oldest media first and clears the corresponding
+database references. An oversized write, full/unavailable filesystem, or
+encoder failure is redacted and counted in health without terminating
+inference or notification processing. Never copy the media volume into CI
+artifacts; it may contain private camera imagery.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 
