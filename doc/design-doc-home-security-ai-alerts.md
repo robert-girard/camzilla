@@ -121,6 +121,7 @@ The RK3588 NPU doesn't hold model weights persistently on-chip — it has small 
 - Phase 3 stores cameras, verified capabilities, alert rules, event metadata, configuration versions, and secret references in SQLite on local x86-host storage through SQLAlchemy 2 and Alembic migrations. Phase 4b migrates and validates that state on local Orange Pi storage after authentication is complete.
 - Snapshots and clips are filesystem objects with database metadata/references. Retention coordinates deletion of both; media is not stored as database blobs.
 - Plaintext credentials and authenticated camera/notifier URLs are not persisted. Database rows refer to environment/external secret identifiers.
+- Backup restore validates its optimistic version before model warm-up and serializes any runtime change with the database commit under the inference switch lock. Candidate or commit failure restores the last healthy runtime without persisting the backup; an unloadable persisted selection at startup records the configured bootstrap fallback and reports degraded readiness.
 - Keep transaction and repository boundaries portable to PostgreSQL. PostgreSQL becomes appropriate for multiple application instances, a remote/shared database, or sustained concurrent-write pressure; it is not required for the initial single-node deployment.
 - Do not place SQLite database/WAL files on a network filesystem. Backup/restore and disk-full behavior require integration tests before persistence is considered complete.
 

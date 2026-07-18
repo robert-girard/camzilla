@@ -224,6 +224,12 @@ but exclude secret values, secret references, transient
 capability probes, events, and media. Restore uses the current optimistic
 configuration version, preserves existing external-secret bindings, and gives
 new cameras derived `env:` references that must be configured separately.
+If a backup selects a different inference capability, Camzilla serializes model
+warm-up and the configuration commit: a stale version never starts the switch,
+and a failed warm-up leaves both the saved configuration and last healthy
+runtime unchanged. An unloadable saved model at startup activates and persists
+the configured bootstrap fallback while readiness reports a redacted degraded
+state.
 Current exports use backup schema version 2. Person-only version 1 backups are
 migrated to semantic IDs and the active model's known catalog revision during
 validation; incompatible or unknown catalogs are rejected rather than guessed.
