@@ -89,3 +89,29 @@ class InferenceCapabilitiesResponse(BaseModel):
 
 class InferenceSelectionRequest(BaseModel):
     capability_id: str = Field(min_length=1, max_length=160, pattern=r"^[a-z0-9][a-z0-9_.:-]+$")
+
+
+PtzDirection = Literal["left", "right", "up", "down", "in", "out"]
+
+
+class PtzCapabilityResponse(BaseModel):
+    camera_name: str
+    available: bool
+    verified: bool
+    unavailable_reason: str | None = None
+    supports_continuous_move: bool
+    supports_stop: bool = False
+    max_speed: float = 0.3
+    max_duration_seconds: float = 1.0
+
+
+class PtzMoveRequest(BaseModel):
+    direction: PtzDirection
+    speed: float = Field(default=0.15, ge=0.05, le=0.3)
+    duration_seconds: float = Field(default=1.0, ge=0.25, le=1.0)
+
+
+class PtzMoveResponse(BaseModel):
+    status: Literal["accepted"] = "accepted"
+    direction: PtzDirection
+    duration_seconds: float

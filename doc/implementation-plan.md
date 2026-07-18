@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1b implementation complete; GitHub Actions confirmation pending before Phase 2 starts (Orange Pi deployment deferred until post-auth Phase 4b)
+Status: Phase 2 in progress; Phase 1b GitHub Actions confirmation remains pending (Orange Pi deployment deferred until post-auth Phase 4b)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -263,11 +263,11 @@ The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first came
 
 #### PTZ
 
-- [ ] Model PTZ as an optional verified capability, not merely an advertised ONVIF service.
-- [ ] Implement bounded timed `ContinuousMove` commands using server-enforced speed/duration limits; never rely on unsupported `Stop`.
-- [ ] Add keyboard/touch-accessible PTZ controls with press throttling, request state, and failure feedback.
-- [ ] Unit-test command bounds/direction mapping and integration-test against a fake ONVIF service.
-- [ ] Add a manual physical-camera PTZ checklist that avoids repeated/unattended movement.
+- [x] Model PTZ as an optional verified capability, not merely an advertised ONVIF service.
+- [x] Implement bounded timed `ContinuousMove` commands using server-enforced speed/duration limits; never rely on unsupported `Stop`.
+- [x] Add keyboard/touch-accessible PTZ controls with press throttling, request state, and failure feedback.
+- [x] Unit-test command bounds/direction mapping and integration-test against a fake ONVIF service.
+- [x] Add a manual physical-camera PTZ checklist that avoids repeated/unattended movement.
 
 #### Alerts and reliability
 
@@ -288,6 +288,10 @@ The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first came
 - [ ] Browser PTZ performs short bounded moves without requiring `Stop`.
 - [ ] A qualifying detection emits at most one Discord alert per debounce window with an annotated snapshot, and dry-run mode emits none.
 - [ ] Automated tests pass; camera/CUDA-only checks have documented results and skip semantics.
+
+### Phase 2 validation evidence
+
+- 2026-07-17: PTZ contract, bounds, direction mapping, server throttle, and the timed `ContinuousMove`-only ONVIF adapter passed focused backend tests against a fake service. Frontend lint/type/build, unit tests, and eleven deterministic Playwright flows passed, including PTZ acceptance, operation-verification gating, and redacted failure recovery. Physical movement remains an explicit attended smoke test and was not performed during unattended development.
 
 ## Phase 3 — Operability, history, and multi-camera groundwork (pre-auth)
 

@@ -22,6 +22,25 @@ export type DetectionMessage = {
 
 export type StreamDescriptor = { camera_name: string; webrtc_path: string; diagnostic_fallback: 'hls' | 'mjpeg' }
 
+export type PtzDirection = 'left' | 'right' | 'up' | 'down' | 'in' | 'out'
+
+export type PtzCapability = {
+  camera_name: string
+  available: boolean
+  verified: boolean
+  unavailable_reason?: string
+  supports_continuous_move: boolean
+  supports_stop: boolean
+  max_speed: number
+  max_duration_seconds: number
+}
+
+export type PtzMoveResponse = {
+  status: 'accepted'
+  direction: PtzDirection
+  duration_seconds: number
+}
+
 export type InferenceTarget = 'cpu' | 'gpu' | 'npu' | 'tpu'
 
 export type InferenceCapability = {

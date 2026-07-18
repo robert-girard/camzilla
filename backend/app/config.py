@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     allowed_classes: str = "person"
     result_ttl_seconds: float = Field(default=2.0, gt=0)
+    ptz_enabled: bool = False
+    ptz_verified: bool = False
+    onvif_host: str | None = None
+    onvif_port: int = Field(default=8000, ge=1, le=65535)
+    onvif_user: str | None = None
+    onvif_password: str | None = None
+    onvif_profile: str = "PROFILE_000"
 
     @field_validator("inference_backend")
     @classmethod
@@ -74,6 +81,10 @@ class Settings(BaseSettings):
     @property
     def class_filter(self) -> frozenset[str]:
         return frozenset(item.strip() for item in self.allowed_classes.split(",") if item.strip())
+
+    @property
+    def ptz_configuration_complete(self) -> bool:
+        return all((self.onvif_host, self.onvif_user, self.onvif_password, self.onvif_profile))
 
 
 @lru_cache

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { exchangeWebRtcOffer, getStreamDescriptor } from './api'
 import { InferenceSelector } from './InferenceSelector'
 import { isStale, sourceRect } from './overlay'
+import { PtzControls } from './PtzControls'
 import type { DetectionMessage, InferenceSelection, StreamDescriptor } from './types'
 
 type ConnectionState = 'loading' | 'connected' | 'degraded' | 'disconnected'
@@ -177,6 +178,7 @@ export function App() {
         <span>Inference FPS: {result ? result.inference_fps.toFixed(1) : '—'}</span>
         <span>Result age: {age === undefined ? '—' : `${age.toFixed(1)} s`}</span>
       </aside>
+      {stream && <PtzControls cameraName={stream.camera_name} />}
       <InferenceSelector
         onResetDetections={() => setResult(undefined)}
         onSelectionChange={setConfirmedInference}

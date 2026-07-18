@@ -76,6 +76,33 @@ so startup re-verifies the manifest checksum. An unavailable GPU indicates that
 the server has not verified a CUDA device/runtime; Camzilla does not silently
 downgrade a browser-requested GPU switch to CPU.
 
+### Optional PTZ controls
+
+PTZ is disabled by default. The API and browser controls remain unavailable
+until `CAMZILLA_PTZ_ENABLED=true`, the ONVIF host, port, profile, username, and
+password are configured in the ignored `.env`, and
+`CAMZILLA_PTZ_VERIFIED=true` records that this exact camera/profile combination
+has already passed an attended movement check. Credentials stay server-side.
+
+Every button press sends one server-bounded timed `ContinuousMove` command at a
+conservative fixed speed and duration. Camzilla does not send `Stop`, because
+the first verified camera does not implement it. The server rejects commands
+outside its speed/duration limits and throttles overlapping or rapid presses.
+
+Before setting the verification flag for a physical camera, perform this
+attended checklist:
+
+1. Ensure someone can see the camera, its wiring, and the full movement area;
+   remove obstructions and stop any unattended PTZ scripts.
+2. Confirm the configured ONVIF profile belongs to the intended camera without
+   displaying or logging credentials.
+3. Send exactly one 1-second movement at speed 0.1 in a safe direction, then
+   wait at least two seconds and inspect the result.
+4. If needed, send one short opposite-direction command to restore the view.
+   Do not loop commands and do not use the unsupported `Stop` action.
+5. Set `CAMZILLA_PTZ_VERIFIED=true` only after the attended check succeeds.
+   Set it back to `false` whenever the camera, profile, or mounting changes.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 

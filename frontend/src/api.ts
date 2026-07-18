@@ -1,4 +1,10 @@
-import type { InferenceCapabilitiesResponse, StreamDescriptor } from './types'
+import type {
+  InferenceCapabilitiesResponse,
+  PtzCapability,
+  PtzDirection,
+  PtzMoveResponse,
+  StreamDescriptor,
+} from './types'
 
 async function responseError(response: Response, fallback: string): Promise<Error> {
   try {
@@ -39,4 +45,20 @@ export async function applyInferenceSelection(capabilityId: string): Promise<Inf
   })
   if (!response.ok) throw await responseError(response, 'inference switch failed')
   return response.json() as Promise<InferenceCapabilitiesResponse>
+}
+
+export async function getPtzCapability(cameraName: string): Promise<PtzCapability> {
+  const response = await fetch(`/api/v1/cameras/${encodeURIComponent(cameraName)}/capabilities/ptz`)
+  if (!response.ok) throw await responseError(response, 'PTZ capability unavailable')
+  return response.json() as Promise<PtzCapability>
+}
+
+export async function movePtz(cameraName: string, direction: PtzDirection): Promise<PtzMoveResponse> {
+  const response = await fetch(`/api/v1/cameras/${encodeURIComponent(cameraName)}/ptz`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ direction, speed: 0.15, duration_seconds: 1 }),
+  })
+  if (!response.ok) throw await responseError(response, 'PTZ command failed')
+  return response.json() as Promise<PtzMoveResponse>
 }

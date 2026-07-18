@@ -1,7 +1,9 @@
 import httpx
 from fastapi.testclient import TestClient
 
+from app.contracts import PtzCapabilityResponse
 from app.main import app
+from app.ptz import PtzService
 
 
 def test_stream_descriptor_is_sanitized() -> None:
@@ -67,6 +69,47 @@ def test_inference_selection_rejects_unknown_and_unavailable_ids() -> None:
     assert missing.json() == {"detail": "inference capability not found"}
     assert unavailable.status_code == 409
     assert unavailable.json() == {"detail": "inference capability is unavailable"}
+
+
+def test_ptz_capability_is_unavailable_until_operation_verified() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/cameras/front-door/capabilities/ptz")
+        move = client.post(
+            "/api/v1/cameras/front-door/ptz",
+            json={"direction": "left", "speed": 0.2, "duration_seconds": 0.5},
+        )
+    assert response.status_code == 200
+    assert response.json()["available"] is False
+    assert response.json()["supports_stop"] is False
+    assert move.status_code == 409
+    assert move.json() == {"detail": "PTZ is unavailable"}
+
+
+def test_ptz_endpoint_uses_bounded_request_and_redacts_adapter_failure() -> None:
+    class BrokenController:
+        async def continuous_move(self, _request):
+            raise RuntimeError("private ONVIF endpoint and credentials")
+
+    capability = PtzCapabilityResponse(
+        camera_name="front-door",
+        available=True,
+        verified=True,
+        supports_continuous_move=True,
+    )
+    with TestClient(app) as client:
+        app.state.ptz = PtzService(capability, BrokenController())
+        response = client.post(
+            "/api/v1/cameras/front-door/ptz",
+            json={"direction": "up", "speed": 0.2, "duration_seconds": 0.5},
+        )
+        unbounded = client.post(
+            "/api/v1/cameras/front-door/ptz",
+            json={"direction": "up", "speed": 1, "duration_seconds": 10},
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "PTZ command failed"}
+    assert "private ONVIF" not in response.text
+    assert unbounded.status_code == 422
 
 
 def test_whep_proxy_uses_internal_bridge_and_returns_only_sdp(monkeypatch) -> None:

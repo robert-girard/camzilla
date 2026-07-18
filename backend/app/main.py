@@ -11,11 +11,15 @@ from .config import Settings, get_settings
 from .contracts import (
     InferenceCapabilitiesResponse,
     InferenceSelectionRequest,
+    PtzCapabilityResponse,
+    PtzMoveRequest,
+    PtzMoveResponse,
     StreamDescriptor,
 )
 from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
 from .model_registry import ModelRegistry
 from .pipeline import InferencePipeline, OpenCvRestreamSource, SyntheticFrameSource
+from .ptz import PtzBusyError, PtzService, PtzUnavailableError, build_ptz_service
 from .selection import (
     CapabilitySpec,
     InferenceSelectionService,
@@ -116,6 +120,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         backend_for_capability,
     )
     app.state.selection = selection
+    app.state.ptz = build_ptz_service(settings)
     heartbeat = asyncio.create_task(hub.heartbeat())
     try:
         yield
@@ -198,6 +203,34 @@ async def select_inference(
             404 if error.kind == "not_found" else 409 if error.kind == "unavailable" else 503
         )
         raise HTTPException(status_code=status_code, detail=error.public_message) from error
+
+
+@app.get(
+    "/api/v1/cameras/{camera_name}/capabilities/ptz",
+    response_model=PtzCapabilityResponse,
+)
+async def ptz_capability(camera_name: str) -> PtzCapabilityResponse:
+    settings = get_settings()
+    if camera_name != settings.camera_name:
+        raise HTTPException(status_code=404, detail="camera not found")
+    ptz: PtzService = app.state.ptz
+    return ptz.capability
+
+
+@app.post("/api/v1/cameras/{camera_name}/ptz", response_model=PtzMoveResponse)
+async def move_ptz(camera_name: str, request: PtzMoveRequest) -> PtzMoveResponse:
+    settings = get_settings()
+    if camera_name != settings.camera_name:
+        raise HTTPException(status_code=404, detail="camera not found")
+    try:
+        await app.state.ptz.move(request)
+    except PtzUnavailableError as error:
+        raise HTTPException(status_code=409, detail="PTZ is unavailable") from error
+    except PtzBusyError as error:
+        raise HTTPException(status_code=429, detail="PTZ command is throttled") from error
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="PTZ command failed") from error
+    return PtzMoveResponse(direction=request.direction, duration_seconds=request.duration_seconds)
 
 
 @app.get("/api/v1/stream", response_model=StreamDescriptor)

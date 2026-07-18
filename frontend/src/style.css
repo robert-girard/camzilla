@@ -12,6 +12,21 @@ main { max-width: 1100px; margin: auto; padding: 1rem; }
 .fullscreen:focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
 .viewer:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
 .diagnostics { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .75rem; color: #cbd5e1; font-size: .875rem; }
+.ptz-controls { display: grid; grid-template-columns: minmax(14rem, 1fr) auto; gap: 1rem 2rem; align-items: center; margin-top: 1.5rem; padding: 1rem; border: 1px solid #334155; border-radius: .5rem; background: #151a24; }
+.ptz-controls h2 { margin: 0; }
+.ptz-controls p { margin: .4rem 0 0; color: #a8b3c5; }
+.ptz-grid { display: grid; grid-template-areas: ". up zoom-in" "left down right" ". . zoom-out"; gap: .4rem; }
+.ptz-grid button { width: 2.75rem; height: 2.75rem; border: 1px solid #64748b; border-radius: .35rem; background: #1e293b; color: #f8fafc; font-size: 1.25rem; cursor: pointer; }
+.ptz-grid button:hover:not(:disabled) { background: #0369a1; }
+.ptz-grid button:focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
+.ptz-grid button:disabled { color: #64748b; cursor: not-allowed; }
+.ptz-up { grid-area: up; }
+.ptz-left { grid-area: left; }
+.ptz-right { grid-area: right; }
+.ptz-down { grid-area: down; }
+.ptz-in { grid-area: zoom-in; }
+.ptz-out { grid-area: zoom-out; }
+.ptz-note, .ptz-controls .selector-error { grid-column: 1 / -1; }
 .inference-selector { margin-top: 1.5rem; padding: 1rem; border: 1px solid #334155; border-radius: .5rem; background: #151a24; }
 .selector-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: start; }
 .selector-heading h2, .target-group h3 { margin: 0; }
@@ -28,4 +43,5 @@ main { max-width: 1100px; margin: auto; padding: 1rem; }
 .selector-actions button { padding: .55rem .8rem; border: 0; border-radius: .35rem; background: #0284c7; color: white; cursor: pointer; }
 .selector-actions button:disabled { background: #475569; cursor: not-allowed; }
 .selector-error { padding: .6rem; border: 1px solid #ef4444; border-radius: .35rem; background: #450a0a; }
+@media (max-width: 560px) { .ptz-controls { grid-template-columns: 1fr; } .ptz-grid { justify-self: start; } }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

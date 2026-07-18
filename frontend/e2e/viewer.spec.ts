@@ -4,6 +4,8 @@ type MockOptions = {
   videoFailure?: boolean
   selectionFailure?: boolean
   switchDelayMs?: number
+  ptzAvailable?: boolean
+  ptzFailure?: boolean
 }
 
 function detectionMessage() {
@@ -66,6 +68,7 @@ async function installMocks(page: Page, options: MockOptions = {}) {
     Object.defineProperty(window, '__camzillaCloseMetadata', {
       value: () => sockets.at(-1)?.onclose?.(new CloseEvent('close')),
     })
+    Object.defineProperty(window, '__camzillaPtzMoves', { value: [] as string[] })
     window.fetch = async (input, init) => {
       const url = String(input)
       if (url.includes('/api/v1/stream')) {
@@ -97,6 +100,28 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       }
       if (url.includes('/api/v1/inference')) {
         return new Response(JSON.stringify(inference), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/capabilities/ptz')) {
+        const available = settings.ptzAvailable !== false
+        return new Response(JSON.stringify({
+          camera_name: 'front-door', available, verified: available,
+          unavailable_reason: available ? null : 'PTZ is configured but not operation-verified',
+          supports_continuous_move: available, supports_stop: false,
+          max_speed: 0.3, max_duration_seconds: 1,
+        }), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.endsWith('/ptz')) {
+        if (settings.ptzFailure) {
+          return new Response(JSON.stringify({ detail: 'PTZ command failed' }), {
+            status: 503, headers: { 'content-type': 'application/json' },
+          })
+        }
+        const body = JSON.parse(String(init?.body)) as { direction: string; duration_seconds: number }
+        const testWindow = window as typeof window & { __camzillaPtzMoves: string[] }
+        testWindow.__camzillaPtzMoves.push(body.direction)
+        return new Response(JSON.stringify({
+          status: 'accepted', direction: body.direction, duration_seconds: body.duration_seconds,
+        }), { headers: { 'content-type': 'application/json' } })
       }
       if (settings.videoFailure) return new Response('unavailable', { status: 503 })
       return new Response('v=0', { headers: { 'content-type': 'application/sdp' } })
@@ -195,4 +220,33 @@ test('shows the proxied diagnostic fallback when video signaling fails', async (
     'href', '/api/v1/diagnostics/hls/stream.m3u8',
   )
   await expect(page.getByLabel('Diagnostics')).toContainText('Video: degraded')
+})
+
+test('sends one bounded PTZ command and reports acceptance', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const panLeft = page.getByRole('button', { name: 'Pan left' })
+  await expect(panLeft).toBeEnabled()
+  await panLeft.click()
+  await expect(page.getByText('left movement accepted')).toBeVisible()
+  const moves = await page.evaluate(() => {
+    const testWindow = window as typeof window & { __camzillaPtzMoves: string[] }
+    return testWindow.__camzillaPtzMoves
+  })
+  expect(moves).toEqual(['left'])
+})
+
+test('keeps PTZ controls disabled until operation verification', async ({ page }) => {
+  await installMocks(page, { ptzAvailable: false })
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Pan left' })).toBeDisabled()
+  await expect(page.getByText('PTZ unavailable: PTZ is configured but not operation-verified')).toBeVisible()
+})
+
+test('reports a PTZ command failure without exposing adapter details', async ({ page }) => {
+  await installMocks(page, { ptzFailure: true })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await expect(page.getByRole('alert')).toHaveText('PTZ command failed')
+  await expect(page.getByRole('button', { name: 'Zoom in' })).toBeEnabled()
 })
