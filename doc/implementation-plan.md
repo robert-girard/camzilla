@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 2 in progress; Phase 1b GitHub Actions confirmation remains pending (Orange Pi deployment deferred until post-auth Phase 4b)
+Status: Phase 3 in progress; Phase 2 implementation complete with attended PTZ and live Discord checks explicitly deferred (Phase 1b GitHub Actions confirmation remains pending)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -33,6 +33,7 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 - No authentication is present until Phase 4. Before then, services bind to loopback by default; LAN access is explicit and documented as trusted-network-only.
 - Phase 1 creates a root `README.md` as the developer/operator entry point, covering development live reload, production-like x86 usage, configuration, security, tests, health, troubleshooting, and the post-auth Phase 4b boundary for Orange Pi/RKNN support.
 - Persistent relational state uses SQLite on local storage with SQLAlchemy 2 and Alembic. Media remains in filesystem storage, credentials remain in environment/external secrets, and PostgreSQL is a later migration path for multi-instance or write-heavy deployments rather than an initial dependency.
+- Per user direction on 2026-07-17, implementation proceeds through Phase 3b while live Discord delivery testing is deferred until an attended session. Deterministic fake-notifier coverage and dry-run production smoke are required before advancing. Physical PTZ movement also remains deferred because no explicit camera-movement approval was given; the browser/API path is covered against a fake ONVIF service meanwhile.
 
 ## Review of the PRD and preliminary design
 
@@ -279,20 +280,21 @@ The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first came
 - [x] Provide a dry-run notifier and require explicit confirmation/configuration before sending real alerts.
 - [x] Test debounce boundaries, duplicate suppression, attachment limits, retry policy, reconnect, secret redaction, and notifier failure isolation.
 - [x] Add Playwright coverage for PTZ states, alert rule display/dry-run, degraded health, and recovery.
-- [~] Run a sustained production-like x86 smoke through service restart using CPU and available CUDA, recording latency, throughput, memory, and recovery behavior without retaining private media.
+- [x] Run a sustained production-like x86 smoke through service restart using CPU and available CUDA, recording latency, throughput, memory, and recovery behavior without retaining private media.
 
 ### Exit criteria
 
-- [ ] The production-like x86 stack survives service restart and sustains the agreed CPU/CUDA performance envelope without unbounded latency or queues.
-- [ ] The Phase 1b selector applies supported Ultralytics CPU/CUDA combinations while NPU and TPU remain explicitly unavailable.
-- [ ] Browser PTZ performs short bounded moves without requiring `Stop`.
-- [ ] A qualifying detection emits at most one Discord alert per debounce window with an annotated snapshot, and dry-run mode emits none.
-- [ ] Automated tests pass; camera/CUDA-only checks have documented results and skip semantics.
+- [x] The production-like x86 stack survives service restart and sustains the agreed CPU/CUDA performance envelope without unbounded latency or queues.
+- [x] The Phase 1b selector applies supported Ultralytics CPU/CUDA combinations while NPU and TPU remain explicitly unavailable.
+- [~] Browser PTZ performs short bounded moves without requiring `Stop`; deterministic browser/fake-ONVIF coverage passes, but attended physical movement awaits explicit approval.
+- [~] A qualifying detection emits at most one Discord alert per debounce window with an annotated snapshot, and dry-run mode emits none externally; deterministic coverage passes, but the user deferred a real webhook smoke.
+- [x] Automated tests pass; camera/CUDA-only checks have documented results and skip semantics.
 
 ### Phase 2 validation evidence
 
 - 2026-07-17: PTZ contract, bounds, direction mapping, server throttle, and the timed `ContinuousMove`-only ONVIF adapter passed focused backend tests against a fake service. Frontend lint/type/build, unit tests, and eleven deterministic Playwright flows passed, including PTZ acceptance, operation-verification gating, and redacted failure recovery. Physical movement remains an explicit attended smoke test and was not performed during unattended development.
 - 2026-07-17: The alert and reliability suite passed 65 backend tests plus 8 expected opt-in skips and thirteen Playwright flows. Deterministic adapters covered exact debounce boundaries, bounded annotated attachments, Discord timeout/retry/rate-limit behavior, explicit delivery confirmation, source reconnect, inference/notifier failure isolation, stream-down suppression, and visible degraded/recovered UI states. Per user direction, no real Discord webhook request was sent; live alert delivery remains deferred until an attended session.
+- 2026-07-17: A production-image, no-camera, dry-run soak used checksum-verified YOLO11s on CPU. Before restart it processed 572 frames at 4.99 FPS with sampled inference latency of 41–51 ms, zero failed/dropped frames, and approximately 399–418 MiB API memory. After an API-container restart it returned ready, reloaded the same identity, and processed another 243 frames at 5.00 FPS with 68 ms sampled latency, zero failures/drops, and approximately 394 MiB memory. Frontend and bridge remained healthy. CUDA was unavailable, so all six GPU choices stayed disabled with the expected reason. The isolated stack was removed and retained no media.
 
 ## Phase 3 — Operability, history, and multi-camera groundwork (pre-auth)
 
