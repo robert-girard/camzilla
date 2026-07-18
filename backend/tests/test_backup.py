@@ -79,6 +79,14 @@ def test_restore_round_trip_preserves_existing_refs_and_derives_new_refs(reposit
         repository.restore_backup(document, expected_config_version=version)
 
 
+def test_configuration_version_preflight_rejects_stale_restore(repository) -> None:
+    version = repository.configuration_version()
+
+    repository.require_configuration_version(version)
+    with pytest.raises(ConfigurationConflictError):
+        repository.require_configuration_version(version - 1)
+
+
 def test_person_only_v1_backup_migrates_to_semantic_ids_and_active_catalog() -> None:
     legacy = {
         "schema_version": "1",

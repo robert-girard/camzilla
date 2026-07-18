@@ -114,6 +114,7 @@ def build_capability_specs(
 BackendFactory = Callable[[CapabilitySpec], InferenceBackend]
 SelectionChanged = Callable[[str], Awaitable[None]]
 SelectionPreflight = Callable[[CapabilitySpec], Awaitable[None]]
+SelectionCommit = Callable[[str], Awaitable[None]]
 
 
 class InferenceSelectionService:
@@ -168,72 +169,118 @@ class InferenceSelectionService:
 
     async def select(self, requested_id: str) -> InferenceCapabilitiesResponse:
         async with self._switch_lock:
-            spec = self.specs.get(requested_id)
-            if spec is None:
-                raise SelectionError("not_found", "inference capability not found")
-            if not spec.capability.available or not spec.capability.compatible:
-                raise SelectionError("unavailable", "inference capability is unavailable")
-            if requested_id == self.active_capability_id:
-                self.transition_state = "ready"
-                self.transition_error = None
-                return self.response()
-            if self.selection_preflight:
-                await self.selection_preflight(spec)
+            return await self._select_locked(
+                requested_id,
+                commit=self.selection_changed,
+                run_preflight=True,
+                commit_when_unchanged=False,
+                preserve_commit_error=False,
+            )
 
-            self.transition_state = "switching"
+    async def select_with_commit(
+        self,
+        requested_id: str,
+        commit: SelectionCommit,
+        *,
+        run_preflight: bool = True,
+    ) -> InferenceCapabilitiesResponse:
+        """Serialize a runtime switch with a caller-owned configuration transaction."""
+        async with self._switch_lock:
+            return await self._select_locked(
+                requested_id,
+                commit=commit,
+                run_preflight=run_preflight,
+                commit_when_unchanged=True,
+                preserve_commit_error=True,
+            )
+
+    async def _select_locked(
+        self,
+        requested_id: str,
+        *,
+        commit: SelectionCommit | None,
+        run_preflight: bool,
+        commit_when_unchanged: bool,
+        preserve_commit_error: bool,
+    ) -> InferenceCapabilitiesResponse:
+        spec = self.specs.get(requested_id)
+        if spec is None:
+            raise SelectionError("not_found", "inference capability not found")
+        if not spec.capability.available or not spec.capability.compatible:
+            raise SelectionError("unavailable", "inference capability is unavailable")
+        if requested_id == self.active_capability_id:
+            if commit_when_unchanged and commit:
+                await commit(requested_id)
+            self.transition_state = "ready"
             self.transition_error = None
-            self.pipeline.pause()
+            return self.response()
+        if run_preflight and self.selection_preflight:
+            await self.selection_preflight(spec)
+
+        self.transition_state = "switching"
+        self.transition_error = None
+        self.pipeline.pause()
+        try:
+            candidate = self.backend_factory(spec)
             try:
-                candidate = self.backend_factory(spec)
-                try:
-                    await candidate.load()
-                    health = await candidate.health()
-                    if (
-                        not health.ready
-                        or health.backend_id != spec.capability.backend_id
-                        or health.model_id != spec.capability.model_id
-                        or health.target != spec.capability.target
-                    ):
-                        raise RuntimeError("candidate identity or health did not match")
-                except Exception as error:
-                    with suppress(Exception):
-                        await candidate.close()
-                    self.transition_state = "degraded"
-                    self.transition_error = "switch failed; previous inference remains active"
-                    raise SelectionError("failed", self.transition_error) from error
-                try:
-                    previous = await self.worker.replace_backend(candidate)
-                except Exception as error:
-                    with suppress(Exception):
-                        await candidate.close()
-                    self.transition_state = "degraded"
-                    self.transition_error = "switch failed; previous inference remains active"
-                    raise SelectionError("failed", self.transition_error) from error
+                await candidate.load()
+                health = await candidate.health()
+                if (
+                    not health.ready
+                    or health.backend_id != spec.capability.backend_id
+                    or health.model_id != spec.capability.model_id
+                    or health.target != spec.capability.target
+                ):
+                    raise RuntimeError("candidate identity or health did not match")
+            except Exception as error:
+                with suppress(Exception):
+                    await candidate.close()
+                self.transition_state = "degraded"
+                self.transition_error = "switch failed; previous inference remains active"
+                raise SelectionError("failed", self.transition_error) from error
+            try:
+                previous = await self.worker.replace_backend(candidate)
+            except Exception as error:
+                with suppress(Exception):
+                    await candidate.close()
+                self.transition_state = "degraded"
+                self.transition_error = "switch failed; previous inference remains active"
+                raise SelectionError("failed", self.transition_error) from error
 
-                if self.selection_changed:
+            if commit:
+                try:
+                    await commit(requested_id)
+                except Exception as error:
                     try:
-                        await self.selection_changed(requested_id)
-                    except Exception as error:
                         await self.worker.replace_backend(previous)
-                        with suppress(Exception):
-                            await candidate.close()
+                    except Exception as rollback_error:
                         self.transition_state = "degraded"
-                        self.transition_error = (
-                            "switch persistence failed; previous inference remains active"
-                        )
-                        raise SelectionError("failed", self.transition_error) from error
-
-                self.pipeline.reset()
-                await self.hub.reset()
-                self.active_capability_id = requested_id
-                self.active_device = health.device
-                try:
-                    await previous.close()
-                except Exception:
+                        self.transition_error = "switch rollback failed"
+                        raise SelectionError("failed", self.transition_error) from rollback_error
+                    with suppress(Exception):
+                        await candidate.close()
+                    if preserve_commit_error:
+                        self.transition_state = "ready"
+                        self.transition_error = None
+                        raise
+                    persistence_error = (
+                        "switch persistence failed; previous inference remains active"
+                    )
                     self.transition_state = "degraded"
-                    self.transition_error = "previous inference cleanup failed"
-                    return self.response()
-                self.transition_state = "ready"
+                    self.transition_error = persistence_error
+                    raise SelectionError("failed", persistence_error) from error
+
+            self.pipeline.reset()
+            await self.hub.reset()
+            self.active_capability_id = requested_id
+            self.active_device = health.device
+            try:
+                await previous.close()
+            except Exception:
+                self.transition_state = "degraded"
+                self.transition_error = "previous inference cleanup failed"
                 return self.response()
-            finally:
-                self.pipeline.resume()
+            self.transition_state = "ready"
+            return self.response()
+        finally:
+            self.pipeline.resume()

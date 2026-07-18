@@ -139,6 +139,41 @@ async def test_persistence_failure_rolls_back_runtime_switch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transaction_commit_failure_is_preserved_after_runtime_rollback() -> None:
+    candidate = TrackingBackend("candidate")
+    service, initial, worker, _hub = await make_service({"candidate": candidate})
+
+    async def fail_commit(_capability: str) -> None:
+        raise RuntimeError("private restore conflict")
+
+    with pytest.raises(RuntimeError, match="private restore conflict"):
+        await service.select_with_commit(capability_id("fake", "candidate", "cpu"), fail_commit)
+
+    assert worker.backend is initial
+    assert service.response().active.model_id == "initial"
+    assert service.transition_state == "ready"
+    assert service.transition_error is None
+    assert candidate.closed == 1
+    assert initial.closed == 0
+
+
+@pytest.mark.asyncio
+async def test_transaction_commit_runs_when_runtime_selection_is_unchanged() -> None:
+    candidate = TrackingBackend("candidate")
+    service, _initial, _worker, _hub = await make_service({"candidate": candidate})
+    committed = []
+
+    async def commit(capability: str) -> None:
+        committed.append(capability)
+
+    active_id = capability_id("fake", "initial", "cpu")
+    response = await service.select_with_commit(active_id, commit)
+
+    assert committed == [active_id]
+    assert response.active.capability_id == active_id
+
+
+@pytest.mark.asyncio
 async def test_failed_switch_keeps_previous_backend_and_redacts_failure() -> None:
     candidate = TrackingBackend("broken", fail_load=True)
     service, initial, worker, _hub = await make_service({"broken": candidate})

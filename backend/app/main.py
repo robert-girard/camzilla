@@ -343,10 +343,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if persisted_id != active_id:
         persisted_spec = specs.get(persisted_id)
         if persisted_spec and persisted_spec.capability.available:
-            await selection.select(persisted_id)
+            try:
+                await selection.select(persisted_id)
+            except SelectionError:
+                await asyncio.to_thread(
+                    repository.set_active_capability, active_id, active_catalog.revision
+                )
+                selection.transition_state = "degraded"
+                selection.transition_error = (
+                    "persisted inference selection could not be restored; bootstrap fallback active"
+                )
         else:
+            await asyncio.to_thread(
+                repository.set_active_capability, active_id, active_catalog.revision
+            )
             selection.transition_state = "degraded"
-            selection.transition_error = "persisted inference selection is unavailable"
+            selection.transition_error = (
+                "persisted inference selection is unavailable; bootstrap fallback active"
+            )
     selected_capability = selection.specs[selection.active_capability_id].capability
     selected_catalog = catalog_for(selected_capability.backend_id, selected_capability.model_id)
     current_configuration = await asyncio.to_thread(repository.configuration)
@@ -606,19 +620,33 @@ async def restore_backup(request: BackupRestoreRequest) -> GlobalConfiguration:
     repository: Repository = app.state.repository
     try:
         await asyncio.to_thread(
+            repository.require_configuration_version, request.expected_config_version
+        )
+    except ConfigurationConflictError as error:
+        raise HTTPException(status_code=409, detail="configuration version conflict") from error
+
+    async def commit_restore(_capability_id: str) -> None:
+        await asyncio.to_thread(
             repository.restore_backup,
             request.document,
             expected_config_version=request.expected_config_version,
         )
+
+    try:
+        await selection.select_with_commit(
+            request.document.active_capability_id,
+            commit_restore,
+            run_preflight=False,
+        )
     except ConfigurationConflictError as error:
         raise HTTPException(status_code=409, detail="configuration version conflict") from error
-    if selection.active_capability_id != request.document.active_capability_id:
-        callback = selection.selection_changed
-        selection.selection_changed = None
-        try:
-            await selection.select(request.document.active_capability_id)
-        finally:
-            selection.selection_changed = callback
+    except SelectionError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="backup inference selection could not be activated",
+        ) from error
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="backup restore failed") from error
     app.state.active_catalog_revision = backup_catalog.revision
     restored = await asyncio.to_thread(repository.configuration)
     for camera in restored.cameras:

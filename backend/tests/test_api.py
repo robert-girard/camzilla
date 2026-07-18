@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -6,8 +7,16 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.contracts import PtzCapabilityResponse
+from app.inference import FakeInferenceBackend
 from app.main import app
+from app.persistence import Database, Repository
 from app.ptz import PtzService
+from app.selection import CapabilitySpec
+
+
+class FailingRestoreBackend(FakeInferenceBackend):
+    async def load(self) -> None:
+        raise RuntimeError("private backup candidate failure")
 
 
 def test_stream_descriptor_is_sanitized() -> None:
@@ -304,6 +313,114 @@ def test_backup_export_validation_and_optimistic_restore_are_secret_free() -> No
     assert restored.status_code == 200
     assert restored.json()["alert_rules"][0]["confidence_threshold"] == 0.77
     assert conflict.status_code == 409
+
+
+def test_backup_restore_keeps_database_and_runtime_when_candidate_fails() -> None:
+    with TestClient(app) as client:
+        before = client.get("/api/v1/config").json()
+        document = client.get("/api/v1/backup").json()
+        document["active_capability_id"] = "fake:fake-multi-v1:cpu"
+        for camera in document["cameras"]:
+            camera["catalog_revision"] = "coco-person-car-dog-v1"
+
+        selection = app.state.selection
+        original_factory = selection.backend_factory
+
+        def failing_factory(spec: CapabilitySpec) -> FakeInferenceBackend:
+            return FailingRestoreBackend(
+                spec.capability.model_id,
+                spec.capability.device,
+                spec.capability.target,
+            )
+
+        selection.backend_factory = failing_factory
+        try:
+            response = client.put(
+                "/api/v1/backup",
+                json={"expected_config_version": before["version"], "document": document},
+            )
+        finally:
+            selection.backend_factory = original_factory
+        after = client.get("/api/v1/config").json()
+        inference = client.get("/api/v1/inference").json()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "backup inference selection could not be activated"}
+    assert "private backup" not in response.text
+    assert after == before
+    assert inference["active"]["capability_id"] == "fake:fake-person-v1:cpu"
+
+
+def test_stale_backup_restore_does_not_attempt_runtime_switch() -> None:
+    with TestClient(app) as client:
+        before = client.get("/api/v1/config").json()
+        document = client.get("/api/v1/backup").json()
+        document["active_capability_id"] = "fake:fake-multi-v1:cpu"
+        for camera in document["cameras"]:
+            camera["catalog_revision"] = "coco-person-car-dog-v1"
+        selection = app.state.selection
+        original_factory = selection.backend_factory
+        factory_calls = 0
+
+        def tracking_factory(spec: CapabilitySpec) -> FakeInferenceBackend:
+            nonlocal factory_calls
+            factory_calls += 1
+            return original_factory(spec)
+
+        selection.backend_factory = tracking_factory
+        try:
+            response = client.put(
+                "/api/v1/backup",
+                json={
+                    "expected_config_version": before["version"] + 1,
+                    "document": document,
+                },
+            )
+        finally:
+            selection.backend_factory = original_factory
+        inference = client.get("/api/v1/inference").json()
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "configuration version conflict"}
+    assert factory_calls == 0
+    assert inference["active"]["capability_id"] == "fake:fake-person-v1:cpu"
+
+
+def test_startup_uses_and_persists_bootstrap_fallback_when_saved_model_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database_url = f"sqlite+pysqlite:///{tmp_path / 'camzilla.db'}"
+    database = Database(database_url)
+    database.migrate()
+    repository = Repository(database)
+    repository.seed("front-door", "fake:fake-person-v1:cpu")
+    repository.set_active_capability("fake:fake-multi-v1:cpu", "coco-person-car-dog-v1")
+    database.close()
+    settings = Settings(_env_file=None, database_url=database_url)
+
+    def failing_persisted_factory(spec: CapabilitySpec) -> FakeInferenceBackend:
+        return FailingRestoreBackend(
+            spec.capability.model_id,
+            spec.capability.device,
+            spec.capability.target,
+        )
+
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("app.main.backend_for_capability", failing_persisted_factory)
+    with TestClient(app) as client:
+        readiness = client.get("/health/ready")
+        configuration = client.get("/api/v1/config")
+        inference = client.get("/api/v1/inference")
+
+    assert readiness.status_code == 200
+    assert readiness.json()["status"] == "degraded"
+    assert readiness.json()["inference"]["transition_error"] == (
+        "persisted inference selection could not be restored; bootstrap fallback active"
+    )
+    assert "private backup" not in readiness.text
+    assert configuration.json()["active_capability_id"] == "fake:fake-person-v1:cpu"
+    assert configuration.json()["cameras"][0]["catalog_revision"] == "coco-person-v1"
+    assert inference.json()["active"]["capability_id"] == "fake:fake-person-v1:cpu"
 
 
 def test_restore_activates_and_updates_every_persisted_alert_rule() -> None:

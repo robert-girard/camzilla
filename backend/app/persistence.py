@@ -318,6 +318,14 @@ class Repository:
                 raise RuntimeError("configuration is not initialized")
             return state.version
 
+    def require_configuration_version(self, expected_version: int) -> None:
+        with self.database.session() as session:
+            state = session.get(ConfigState, 1)
+            if state is None:
+                raise RuntimeError("configuration is not initialized")
+            if state.version != expected_version:
+                raise ConfigurationConflictError("configuration version conflict")
+
     def configuration(self) -> GlobalConfiguration:
         with self.database.session() as session:
             state = session.get(ConfigState, 1)
