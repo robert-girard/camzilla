@@ -351,12 +351,12 @@ No new model training, arbitrary label creation, semantic remapping guessed from
 - [x] Add persisted, versioned per-camera detection-category allowlists and per-alert-rule target categories, retaining `person` as the safe default for existing configurations.
 - [x] Expose typed APIs that return categories for the active model/target combination and validate saved selections against that exact capability revision.
 - [x] Apply the per-camera allowlist consistently to detection publication, overlays, metrics, snapshots/clips, and alert evaluation; an alert rule may reference only categories enabled for its camera.
-- [~] Add accessible searchable multi-select controls with select-all/clear actions, category descriptions, active counts, validation, and a preview using deterministic detections.
+- [x] Add accessible searchable multi-select controls with select-all/clear actions, category descriptions, active counts, validation, and a preview using deterministic detections.
 - [x] Reconcile category selections during a Phase 1b model/backend switch by stable semantic ID. Require explicit resolution when the new model lacks a selected category; never silently broaden, drop, or substitute alert targets.
-- [~] Show model changes that would invalidate camera or alert-rule categories before applying the switch, including affected cameras/rules and the available compatible choices.
+- [x] Show model changes that would invalidate camera or alert-rule categories before applying the switch, including affected cameras/rules and the available compatible choices.
 - [x] Record the active category catalog revision and selected semantic IDs in events so historical results remain interpretable after model changes.
 - [ ] Unit/integration-test catalog validation, semantic-ID mapping, defaults, multi-select filtering, persistence/migration, invalidation conflicts, alert isolation, and models with different class catalogs.
-- [ ] Add Playwright coverage for selecting non-person categories, filtering overlays, configuring multi-category alert rules, persistence across restart, and resolving a model-switch incompatibility.
+- [x] Add Playwright coverage for selecting non-person categories, filtering overlays, configuring multi-category alert rules, persistence across restart, and resolving a model-switch incompatibility.
 - [ ] Update backup/export, README configuration guidance, and schema/API compatibility checks for class catalogs and selected categories.
 
 ### Exit criteria

@@ -1,5 +1,7 @@
 export type Detection = {
   class_name: string
+  semantic_id: string
+  native_class_id: number | string
   confidence: number
   box: { x: number; y: number; width: number; height: number }
 }
@@ -126,6 +128,7 @@ export type EventSummary = {
   event_type: string
   triggered_at: string
   categories: string[]
+  catalog_revision: string
   has_snapshot: boolean
   has_clip: boolean
 }
@@ -181,4 +184,36 @@ export type InferenceCapabilitiesResponse = {
   transition_error?: string
   runtime_only: boolean
   capabilities: InferenceCapability[]
+}
+
+export type CatalogCategory = {
+  semantic_id: string
+  native_class_id: number | string
+  display_label: string
+  description?: string
+}
+
+export type ModelClassCatalog = {
+  revision: string
+  backend_id: string
+  model_id: string
+  categories: CatalogCategory[]
+}
+
+export type CategorySelection = {
+  camera_id: string
+  config_version: number
+  catalog: ModelClassCatalog
+  selected_category_ids: string[]
+}
+
+export type CategoryCompatibility = {
+  capability_id: string
+  catalog_revision: string
+  compatible: boolean
+  retained_category_ids: string[]
+  missing_category_ids: string[]
+  affected_camera_ids: string[]
+  affected_rule_ids: string[]
+  available_category_ids: string[]
 }

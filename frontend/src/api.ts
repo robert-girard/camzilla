@@ -4,6 +4,8 @@ import type {
   AlertRuleUpdate,
   BackupDocument,
   BackupValidation,
+  CategoryCompatibility,
+  CategorySelection,
   EventPage,
   GlobalConfiguration,
   RecordingResponse,
@@ -53,6 +55,29 @@ export async function applyInferenceSelection(capabilityId: string): Promise<Inf
   })
   if (!response.ok) throw await responseError(response, 'inference switch failed')
   return response.json() as Promise<InferenceCapabilitiesResponse>
+}
+
+export async function getInferenceCompatibility(capabilityId: string): Promise<CategoryCompatibility> {
+  const response = await fetch(`/api/v1/inference/compatibility/${encodeURIComponent(capabilityId)}`)
+  if (!response.ok) throw await responseError(response, 'category compatibility unavailable')
+  return response.json() as Promise<CategoryCompatibility>
+}
+
+export async function getCameraCategories(cameraId: string): Promise<CategorySelection> {
+  const response = await fetch(`/api/v1/cameras/${encodeURIComponent(cameraId)}/categories`)
+  if (!response.ok) throw await responseError(response, 'camera categories unavailable')
+  return response.json() as Promise<CategorySelection>
+}
+
+export async function updateCameraCategories(
+  cameraId: string,
+  update: { expected_config_version: number; catalog_revision: string; category_ids: string[] },
+): Promise<CategorySelection> {
+  const response = await fetch(`/api/v1/cameras/${encodeURIComponent(cameraId)}/categories`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(update),
+  })
+  if (!response.ok) throw await responseError(response, 'camera category update failed')
+  return response.json() as Promise<CategorySelection>
 }
 
 export async function getPtzCapability(cameraName: string): Promise<PtzCapability> {

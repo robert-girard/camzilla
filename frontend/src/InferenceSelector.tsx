@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { applyInferenceSelection, getInferenceCapabilities } from './api'
+import {
+  applyInferenceSelection,
+  getInferenceCapabilities,
+  getInferenceCompatibility,
+} from './api'
 import type {
+  CategoryCompatibility,
   InferenceCapabilitiesResponse,
   InferenceSelection,
   InferenceTarget,
@@ -20,6 +25,8 @@ export function InferenceSelector({ onResetDetections, onSelectionChange }: Prop
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState<string>()
+  const [compatibility, setCompatibility] = useState<CategoryCompatibility>()
+  const [checkingCompatibility, setCheckingCompatibility] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -42,8 +49,25 @@ export function InferenceSelector({ onResetDetections, onSelectionChange }: Prop
     [selectedId, state],
   )
 
+  useEffect(() => {
+    if (!selected?.available || selected.id === state?.active.capability_id) {
+      setCompatibility(undefined)
+      setCheckingCompatibility(false)
+      return
+    }
+    let cancelled = false
+    setCheckingCompatibility(true)
+    void getInferenceCompatibility(selected.id)
+      .then((value) => { if (!cancelled) setCompatibility(value) })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'category compatibility unavailable')
+      })
+      .finally(() => { if (!cancelled) setCheckingCompatibility(false) })
+    return () => { cancelled = true }
+  }, [selected, state?.active.capability_id])
+
   const apply = async () => {
-    if (!selected?.available || applying || selected.id === state?.active.capability_id) return
+    if (!selected?.available || applying || selected.id === state?.active.capability_id || !compatibility?.compatible) return
     setApplying(true)
     setError(undefined)
     onResetDetections()
@@ -52,6 +76,7 @@ export function InferenceSelector({ onResetDetections, onSelectionChange }: Prop
       setState(response)
       setSelectedId(response.active.capability_id)
       onSelectionChange(response.active)
+      window.dispatchEvent(new Event('camzilla:inference-changed'))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'inference switch failed')
     } finally {
@@ -65,7 +90,7 @@ export function InferenceSelector({ onResetDetections, onSelectionChange }: Prop
         <div>
           <h2 id="inference-selector-heading">Inference model and target</h2>
           <p>
-            This selection is global and runtime-only. Restarting Camzilla restores the deployment default.
+            This global selection is persisted. Category compatibility is checked before a model is loaded.
           </p>
         </div>
         {state && (
@@ -108,7 +133,7 @@ export function InferenceSelector({ onResetDetections, onSelectionChange }: Prop
           <div className="selector-actions">
             <button
               type="button"
-              disabled={!selected?.available || selected.id === state.active.capability_id || applying}
+              disabled={!selected?.available || selected.id === state.active.capability_id || applying || checkingCompatibility || !compatibility?.compatible}
               onClick={() => void apply()}
             >
               {applying ? 'Switching inference…' : 'Apply inference selection'}
@@ -117,6 +142,16 @@ export function InferenceSelector({ onResetDetections, onSelectionChange }: Prop
               {applying ? 'Video remains available while the new backend warms up.' : `State: ${state.transition_state}`}
             </span>
           </div>
+          {checkingCompatibility && <p role="status">Checking saved category compatibility…</p>}
+          {compatibility && !compatibility.compatible && (
+            <div className="compatibility-warning" role="alert">
+              <strong>Resolve category conflicts before switching.</strong>
+              <span>Missing: {compatibility.missing_category_ids.join(', ')}</span>
+              <span>Affected cameras: {compatibility.affected_camera_ids.join(', ') || 'none'}</span>
+              <span>Affected rules: {compatibility.affected_rule_ids.join(', ') || 'none'}</span>
+              <span>Compatible choices: {compatibility.available_category_ids.join(', ')}</span>
+            </div>
+          )}
           <p className="selector-note">
             Unavailable hardware needs its server-side runtime and verified model artifact; it cannot be enabled from the browser.
           </p>

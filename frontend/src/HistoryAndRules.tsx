@@ -1,18 +1,22 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 
 import {
   deleteEvent,
+  getCameraCategories,
   getConfiguration,
   getEvents,
   startRecording,
   stopRecording,
   restoreBackup,
   updateAlertRule,
+  updateCameraCategories,
   validateBackup,
 } from './api'
+import { CategoryMultiSelect } from './CategoryMultiSelect'
 import type {
   AlertRuleConfiguration,
   BackupDocument,
+  CategorySelection,
   EventPage,
   GlobalConfiguration,
   ZonePoint,
@@ -25,6 +29,7 @@ type RuleDraft = {
   scheduleStart: string
   scheduleEnd: string
   zone: ZonePoint[]
+  targetCategories: string[]
 }
 
 function draftFrom(rule: AlertRuleConfiguration): RuleDraft {
@@ -35,6 +40,7 @@ function draftFrom(rule: AlertRuleConfiguration): RuleDraft {
     scheduleStart: rule.schedule_start ?? '22:00',
     scheduleEnd: rule.schedule_end ?? '06:00',
     zone: rule.zone?.points ?? [],
+    targetCategories: rule.target_categories,
   }
 }
 
@@ -50,15 +56,32 @@ export function HistoryAndRules() {
   const [saving, setSaving] = useState(false)
   const [recordingId, setRecordingId] = useState<string>()
   const [backup, setBackup] = useState<BackupDocument>()
+  const [categorySelections, setCategorySelections] = useState<Record<string, CategorySelection>>({})
+  const [cameraCategoryDrafts, setCameraCategoryDrafts] = useState<Record<string, string[]>>({})
+  const [savingCamera, setSavingCamera] = useState<string>()
+
+  const loadConfiguration = useCallback(async () => {
+    try {
+      const value = await getConfiguration()
+      const selections = await Promise.all(value.cameras.map((camera) => getCameraCategories(camera.id)))
+      setConfiguration(value)
+      setCategorySelections(Object.fromEntries(selections.map((selection) => [selection.camera_id, selection])))
+      setCameraCategoryDrafts(Object.fromEntries(
+        selections.map((selection) => [selection.camera_id, selection.selected_category_ids]),
+      ))
+      if (value.alert_rules[0]) setDraft(draftFrom(value.alert_rules[0]))
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'configuration unavailable')
+    }
+  }, [])
+
+  useEffect(() => { void loadConfiguration() }, [loadConfiguration])
 
   useEffect(() => {
-    void getConfiguration()
-      .then((value) => {
-        setConfiguration(value)
-        if (value.alert_rules[0]) setDraft(draftFrom(value.alert_rules[0]))
-      })
-      .catch((failure: unknown) => setError(failure instanceof Error ? failure.message : 'configuration unavailable'))
-  }, [])
+    const reload = () => { void loadConfiguration() }
+    window.addEventListener('camzilla:inference-changed', reload)
+    return () => window.removeEventListener('camzilla:inference-changed', reload)
+  }, [loadConfiguration])
 
   useEffect(() => {
     void getEvents({ page, eventType, sort })
@@ -94,7 +117,7 @@ export function HistoryAndRules() {
         schedule_start: draft.scheduleEnabled ? draft.scheduleStart : undefined,
         schedule_end: draft.scheduleEnabled ? draft.scheduleEnd : undefined,
         zone: draft.zone.length ? { points: draft.zone } : undefined,
-        target_categories: rule.target_categories,
+        target_categories: draft.targetCategories,
       })
       setConfiguration(changed)
       setDraft(draftFrom(changed.alert_rules[0]))
@@ -103,6 +126,31 @@ export function HistoryAndRules() {
       setError(failure instanceof Error ? failure.message : 'rule update failed')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const saveCameraCategories = async (cameraId: string) => {
+    const selection = categorySelections[cameraId]
+    const categoryIds = cameraCategoryDrafts[cameraId] ?? []
+    if (!configuration || !selection) return
+    if (categoryIds.length === 0) {
+      setError('Select at least one detection category.')
+      return
+    }
+    setSavingCamera(cameraId)
+    setError(undefined)
+    try {
+      await updateCameraCategories(cameraId, {
+        expected_config_version: configuration.version,
+        catalog_revision: selection.catalog.revision,
+        category_ids: categoryIds,
+      })
+      await loadConfiguration()
+      setNotice(`Categories saved for ${cameraId}`)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'camera category update failed')
+    } finally {
+      setSavingCamera(undefined)
     }
   }
 
@@ -162,12 +210,24 @@ export function HistoryAndRules() {
       if (restored.alert_rules[0]) setDraft(draftFrom(restored.alert_rules[0]))
       setBackup(undefined)
       setNotice('Configuration restored')
+      await loadConfiguration()
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'backup restore failed')
     }
   }
 
   const rule = configuration?.alert_rules[0]
+  const ruleCamera = rule ? configuration?.cameras.find((camera) => camera.id === rule.camera_id) : undefined
+  const ruleCatalog = ruleCamera ? categorySelections[ruleCamera.id]?.catalog : undefined
+  const ruleCategories = ruleCatalog?.categories.filter(
+    (category) => ruleCamera?.allowed_categories.includes(category.semantic_id),
+  ) ?? []
+  const categoryLabels = useMemo(() => new Map<string, string>(
+    Object.values(categorySelections).flatMap((selection) => selection.catalog.categories)
+      .map((category): [string, string] => [category.semantic_id, category.display_label]),
+  ), [categorySelections])
+  const categoryLabel = (categoryId: string, revision?: string) => categoryLabels.get(categoryId)
+    ?? `${categoryId}${revision ? ` (catalog ${revision} unavailable)` : ''}`
   const polygon = draft?.zone.map((point) => `${point.x * 100},${point.y * 100}`).join(' ')
 
   return (
@@ -176,12 +236,33 @@ export function HistoryAndRules() {
       <div className="camera-list" aria-label="Configured cameras">
         {configuration?.cameras.map((camera) => (
           <article key={camera.id}>
-            <h3>{camera.name}</h3>
-            <span>{String(camera.capabilities.runtime_state ?? (camera.enabled ? 'enabled' : 'disabled'))}</span>
+            <header><h3>{camera.name}</h3>
+              <span>{String(camera.capabilities.runtime_state ?? (camera.enabled ? 'enabled' : 'disabled'))}</span>
+            </header>
             {['synthetic', 'configured', 'ready'].includes(String(camera.capabilities.runtime_state)) && (
               <button type="button" onClick={() => void toggleRecording(camera.id)}>
                 {recordingId ? 'Stop recording' : 'Start recording'}
               </button>
+            )}
+            {categorySelections[camera.id] && (
+              <>
+                <CategoryMultiSelect
+                  label={`Detection categories for ${camera.name}`}
+                  categories={categorySelections[camera.id].catalog.categories}
+                  selectedIds={cameraCategoryDrafts[camera.id] ?? []}
+                  onChange={(categoryIds) => setCameraCategoryDrafts((current) => ({
+                    ...current, [camera.id]: categoryIds,
+                  }))}
+                  disabled={savingCamera === camera.id}
+                />
+                <button
+                  type="button"
+                  disabled={savingCamera === camera.id || !(cameraCategoryDrafts[camera.id]?.length)}
+                  onClick={() => void saveCameraCategories(camera.id)}
+                >
+                  {savingCamera === camera.id ? 'Saving categories…' : 'Save camera categories'}
+                </button>
+              </>
             )}
           </article>
         ))}
@@ -193,7 +274,14 @@ export function HistoryAndRules() {
       </div>
       {rule && draft && (
         <form onSubmit={(event) => { event.preventDefault(); void save() }} className="rule-editor">
-          <h3>Edit {rule.target_categories.join(', ')} rule</h3>
+          <h3>Edit {rule.target_categories.map((item) => categoryLabel(item)).join(', ')} rule</h3>
+          <CategoryMultiSelect
+            label="Alert target categories"
+            categories={ruleCategories}
+            selectedIds={draft.targetCategories}
+            onChange={(targetCategories) => setDraft({ ...draft, targetCategories })}
+            disabled={saving}
+          />
           <label>Confidence (%)
             <input type="number" min="0" max="100" value={Math.round(draft.confidence * 100)} onChange={(event) => setDraft({ ...draft, confidence: Number(event.target.value) / 100 })} />
           </label>
@@ -212,7 +300,7 @@ export function HistoryAndRules() {
             </svg>
             <button type="button" onClick={() => setDraft({ ...draft, zone: [] })}>Clear zone</button>
           </div>
-          <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save rule'}</button>
+          <button type="submit" disabled={saving || draft.targetCategories.length === 0}>{saving ? 'Saving…' : 'Save rule'}</button>
         </form>
       )}
       {notice && <p role="status">{notice}</p>}
@@ -224,7 +312,7 @@ export function HistoryAndRules() {
       <div className="history-table-wrap">
         <table><thead><tr><th>Time</th><th>Camera</th><th>Type</th><th>Categories</th><th>Media</th><th /></tr></thead>
           <tbody>{events?.items.map((item) => <tr key={item.id}>
-            <td>{new Date(item.triggered_at).toLocaleString()}</td><td>{item.camera_id}</td><td>{item.event_type}</td><td>{item.categories.join(', ')}</td>
+            <td>{new Date(item.triggered_at).toLocaleString()}</td><td>{item.camera_id}</td><td>{item.event_type}</td><td>{item.categories.map((category) => categoryLabel(category, item.catalog_revision)).join(', ')}</td>
             <td>{item.has_snapshot ? <a href={`/api/v1/events/${item.id}/snapshot`}>Snapshot</a> : '—'} {item.has_clip && <video aria-label={`Clip from ${item.camera_id}`} controls preload="metadata" src={`/api/v1/events/${item.id}/clip`} />}</td>
             <td><button type="button" onClick={() => void removeEvent(item.id)}>Delete</button></td>
           </tr>)}</tbody>

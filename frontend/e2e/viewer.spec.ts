@@ -7,6 +7,7 @@ type MockOptions = {
   ptzAvailable?: boolean
   ptzFailure?: boolean
   ruleConflict?: boolean
+  incompatibleSwitch?: boolean
 }
 
 function detectionMessage() {
@@ -14,7 +15,7 @@ function detectionMessage() {
     version: 'v1', sequence: 7, capture_timestamp: new Date().toISOString(),
     result_timestamp: new Date().toISOString(), source_width: 1280, source_height: 720,
     backend_id: 'fake', model_id: 'yolov8n', target: 'cpu', device: 'synthetic', inference_ms: 4.5, inference_fps: 5,
-    detections: [{ class_name: 'person', confidence: 0.91, box: { x: 0.25, y: 0.2, width: 0.5, height: 0.5 } }],
+    detections: [{ class_name: 'person', semantic_id: 'coco:person', native_class_id: 0, confidence: 0.91, box: { x: 0.25, y: 0.2, width: 0.5, height: 0.5 } }],
   }
 }
 
@@ -74,25 +75,39 @@ async function installMocks(page: Page, options: MockOptions = {}) {
     })
     Object.defineProperty(window, '__camzillaPtzMoves', { value: [] as string[] })
     Object.defineProperty(window, '__camzillaLastRuleUpdate', { value: null, writable: true })
-    const configuration = {
+    const catalog = {
+      revision: 'coco-person-car-dog-v1', backend_id: 'fake', model_id: 'yolov8n',
+      categories: [
+        { semantic_id: 'coco:person', native_class_id: 0, display_label: 'person', description: 'People visible in the camera frame.' },
+        { semantic_id: 'coco:car', native_class_id: 1, display_label: 'car', description: 'Passenger cars recognized by the active model.' },
+        { semantic_id: 'coco:dog', native_class_id: 2, display_label: 'dog', description: 'Dogs recognized by the active model.' },
+      ],
+    }
+    const defaultConfiguration = {
       version: 3, active_capability_id: 'fake:yolov8n:cpu',
       cameras: [{
         id: 'front-door', name: 'front-door', enabled: true, capabilities: { runtime_state: 'synthetic' },
-        allowed_categories: ['person'], catalog_revision: 'person-v1', version: 1,
+        allowed_categories: ['coco:person'], catalog_revision: catalog.revision, version: 1,
       }, {
         id: 'side-door', name: 'side-door', enabled: true, capabilities: { runtime_state: 'degraded' },
-        allowed_categories: ['person'], catalog_revision: 'person-v1', version: 1,
+        allowed_categories: ['coco:person'], catalog_revision: catalog.revision, version: 1,
       }],
       alert_rules: [{
         id: 'person-detected', camera_id: 'front-door', enabled: true,
-        target_categories: ['person'], confidence_threshold: 0.6, debounce_seconds: 300,
+        target_categories: ['coco:person'], confidence_threshold: 0.6, debounce_seconds: 300,
         schedule_start: null, schedule_end: null, zone: null, version: 1,
       }],
     }
+    const configuration = JSON.parse(
+      sessionStorage.getItem('camzilla-test-configuration') ?? JSON.stringify(defaultConfiguration),
+    ) as typeof defaultConfiguration
+    const persistConfiguration = () => sessionStorage.setItem(
+      'camzilla-test-configuration', JSON.stringify(configuration),
+    )
     let events = [{
       id: '11111111-1111-4111-8111-111111111111', camera_id: 'front-door',
       rule_id: 'person-detected', event_type: 'detection',
-      triggered_at: new Date().toISOString(), categories: ['person'],
+      triggered_at: new Date().toISOString(), categories: ['coco:person'], catalog_revision: catalog.revision,
       has_snapshot: false, has_clip: true,
     }]
     const health = { status: 'ready', camera: 'not_configured', inference: 'ready' }
@@ -107,6 +122,19 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       const url = String(input)
       if (url.includes('/api/v1/stream')) {
         return new Response(JSON.stringify({ camera_name: 'front-door', webrtc_path: '/api/v1/webrtc', diagnostic_fallback: 'hls' }))
+      }
+      if (url.includes('/api/v1/inference/compatibility/')) {
+        const capabilityId = decodeURIComponent(url.split('/').at(-1) ?? '')
+        const incompatible = Boolean(settings.incompatibleSwitch)
+        return new Response(JSON.stringify({
+          capability_id: capabilityId, catalog_revision: incompatible ? 'coco-person-v1' : 'coco80-v1',
+          compatible: !incompatible,
+          retained_category_ids: ['coco:person'],
+          missing_category_ids: incompatible ? ['coco:car'] : [],
+          affected_camera_ids: incompatible ? ['front-door'] : [],
+          affected_rule_ids: incompatible ? ['person-detected'] : [],
+          available_category_ids: incompatible ? ['coco:person'] : ['coco:person', 'coco:car', 'coco:dog'],
+        }), { headers: { 'content-type': 'application/json' } })
       }
       if (url.includes('/api/v1/inference/selection')) {
         if (settings.selectionFailure) {
@@ -160,7 +188,7 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       if (url.includes('/api/v1/alerts/status')) {
         return new Response(JSON.stringify({
           rule: {
-            id: 'person-detected', camera_name: 'front-door', target_classes: ['person'],
+            id: 'person-detected', camera_name: 'front-door', target_classes: ['coco:person'],
             confidence_threshold: 0.6, debounce_seconds: 300, enabled: true,
           },
           requested_notifier: 'dry-run', effective_notifier: 'dry-run',
@@ -196,10 +224,40 @@ async function installMocks(page: Page, options: MockOptions = {}) {
           schedule_end: update.schedule_end ?? null,
           version: configuration.alert_rules[0].version + 1,
         }
+        persistConfiguration()
         return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
       }
       if (url.includes('/api/v1/config')) {
         return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
+      }
+      if (/\/api\/v1\/cameras\/[^/]+\/categories/.test(url)) {
+        const cameraId = decodeURIComponent(url.split('/').at(-2) ?? '')
+        const camera = configuration.cameras.find((item) => item.id === cameraId)
+        if (!camera) return new Response(JSON.stringify({ detail: 'camera not found' }), { status: 404 })
+        if (init?.method === 'PUT') {
+          const update = JSON.parse(String(init.body)) as { category_ids: string[]; catalog_revision: string }
+          camera.allowed_categories = update.category_ids
+          camera.catalog_revision = update.catalog_revision
+          camera.version += 1
+          configuration.version += 1
+          persistConfiguration()
+          if (cameraId === 'front-door') {
+            const detections = update.category_ids.map((categoryId, index) => ({
+              class_name: categoryId === 'coco:car' ? 'car' : categoryId === 'coco:dog' ? 'dog' : 'person',
+              semantic_id: categoryId,
+              native_class_id: index,
+              confidence: categoryId === 'coco:car' ? 0.87 : categoryId === 'coco:dog' ? 0.82 : 0.91,
+              box: { x: 0.1 + index * 0.25, y: 0.2, width: 0.2, height: 0.4 },
+            }))
+            sockets.at(-1)?.onmessage?.(new MessageEvent('message', { data: JSON.stringify({
+              ...message, detections, result_timestamp: new Date().toISOString(),
+            }) }))
+          }
+        }
+        return new Response(JSON.stringify({
+          camera_id: cameraId, config_version: configuration.version,
+          catalog, selected_category_ids: camera.allowed_categories,
+        }), { headers: { 'content-type': 'application/json' } })
       }
       if (url.includes('/api/v1/backup/validate')) {
         return new Response(JSON.stringify({ valid: true, errors: [] }), {
@@ -208,6 +266,7 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       }
       if (url.endsWith('/api/v1/backup')) {
         configuration.version += 1
+        persistConfiguration()
         return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
       }
       if (url.includes('/api/v1/cameras/front-door/recordings')) {
@@ -286,6 +345,17 @@ test('keeps the confirmed selection and reports a failed switch', async ({ page 
   await expect(page.getByRole('alert')).toHaveText('switch failed; previous inference remains active')
   await expect(page.getByText('Active: yolov8n on CPU')).toBeVisible()
   await expect(page.getByLabel('Diagnostics')).toContainText('Backend/model: fake/yolov8n')
+})
+
+test('previews affected cameras and rules before an incompatible model switch', async ({ page }) => {
+  await installMocks(page, { incompatibleSwitch: true })
+  await page.goto('/')
+  await page.getByRole('radio', { name: 'yolo11s', exact: true }).check()
+  const warning = page.getByRole('alert').filter({ hasText: 'Resolve category conflicts' })
+  await expect(warning).toContainText('Missing: coco:car')
+  await expect(warning).toContainText('Affected cameras: front-door')
+  await expect(warning).toContainText('Affected rules: person-detected')
+  await expect(page.getByRole('button', { name: 'Apply inference selection' })).toBeDisabled()
 })
 
 test('keeps the overlay with the video during resize and fullscreen', async ({ page }) => {
@@ -430,6 +500,44 @@ test('shows multiple camera runtime states without duplicating active controls',
   await expect(cameras.getByRole('button', { name: 'Start recording' })).toHaveCount(1)
 })
 
+test('selects non-person categories, filters overlays, and persists multi-category rules', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  const cameraCategories = history.getByRole('group', { name: 'Detection categories for front-door' })
+  await expect(cameraCategories).toContainText('1 active of 3 available')
+  await cameraCategories.getByLabel('Search categories').fill('car')
+  await expect(cameraCategories.getByText('dog', { exact: true })).toBeHidden()
+  await cameraCategories.getByRole('checkbox', { name: /car/ }).check()
+  await expect(cameraCategories).toContainText('Selection preview: person, car')
+  await history.getByRole('button', { name: 'Save camera categories' }).first().click()
+  await expect(history.getByText('Categories saved for front-door')).toBeVisible()
+
+  const alertCategories = history.getByRole('group', { name: 'Alert target categories' })
+  await alertCategories.getByRole('checkbox', { name: /car/ }).check()
+  await alertCategories.getByRole('checkbox', { name: /person/ }).uncheck()
+  await history.getByRole('button', { name: 'Save rule' }).click()
+  await expect(history.getByText('Rule saved')).toBeVisible()
+
+  await cameraCategories.getByRole('button', { name: 'Clear' }).click()
+  await cameraCategories.getByRole('checkbox', { name: /car/ }).check()
+  await history.getByRole('button', { name: 'Save camera categories' }).first().click()
+  await expect(page.getByText('car 87%')).toBeVisible()
+  await expect(page.getByText('person 91%')).toBeHidden()
+  const update = await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __camzillaLastRuleUpdate: { target_categories: string[] }
+    }
+    return testWindow.__camzillaLastRuleUpdate
+  })
+  expect(update.target_categories).toEqual(['coco:car'])
+  await page.reload()
+  const restoredCameraCategories = page.getByRole('region', { name: 'Configuration and alert history' })
+    .getByRole('group', { name: 'Detection categories for front-door' })
+  await restoredCameraCategories.getByLabel('Search categories').fill('car')
+  await expect(restoredCameraCategories.getByRole('checkbox', { name: /car/ })).toBeChecked()
+})
+
 test('validates a secret-free backup before restoring configuration', async ({ page }) => {
   await installMocks(page)
   await page.goto('/')
@@ -443,7 +551,7 @@ test('validates a secret-free backup before restoring configuration', async ({ p
       active_capability_id: 'fake:yolov8n:cpu',
       cameras: [{
         id: 'front-door', name: 'front-door', enabled: true,
-        allowed_categories: ['person'], catalog_revision: 'person-v1',
+        allowed_categories: ['coco:person'], catalog_revision: 'coco-person-car-dog-v1',
       }],
       alert_rules: [],
     })),
