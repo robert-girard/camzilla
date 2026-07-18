@@ -39,6 +39,11 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def ensure_runtime_readable(path: Path) -> None:
+    """Allow the non-root inference container to read a verified public model artifact."""
+    path.chmod(path.stat().st_mode | 0o044)
+
+
 def download_model(model_id: str, repository: Path) -> Path:
     manifest = read_manifest(repository / "models" / "manifest.yaml")
     if model_id not in manifest:
@@ -50,6 +55,7 @@ def download_model(model_id: str, repository: Path) -> Path:
     expected = record["sha256"]
     if destination.exists():
         if sha256(destination) == expected:
+            ensure_runtime_readable(destination)
             return destination
         raise ValueError(
             f"{destination.name} exists but does not match the manifest; remove it explicitly"
@@ -74,6 +80,7 @@ def download_model(model_id: str, repository: Path) -> Path:
                 f"downloaded {model_id} checksum mismatch (expected {expected}, got {actual})"
             )
         os.replace(temporary_path, destination)
+        ensure_runtime_readable(destination)
         temporary_name = None
         return destination
     finally:
