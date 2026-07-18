@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 3 in progress; Phase 2 implementation complete with attended PTZ and live Discord checks explicitly deferred (Phase 1b GitHub Actions confirmation remains pending)
+Status: Phase 3b in progress; Phase 3 complete locally, with remote GitHub Actions confirmation and the attended Phase 2 PTZ/Discord checks still pending
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -324,13 +324,14 @@ The system becomes convenient for daily personal use before authentication is in
 - 2026-07-17: Media storage, quota retention, pre-roll/post-roll sessions, manual-recording gating, database-reference cleanup, and redacted disk failure behavior passed 83 backend tests plus 8 expected opt-in skips, including a real OpenCV MP4 encode on the development runtime. Seventeen Playwright flows passed with inline clip playback and manual start/stop controls. Tests used synthetic bytes/frames under temporary roots and retained no media.
 - 2026-07-17: Multi-camera persistence/API validation and the bounded round-robin scheduler passed 86 backend tests plus 8 expected opt-in skips. Flooding two simulated sources retained only one latest frame per camera and serviced the quieter source after the busy source's single turn. Eighteen Playwright flows passed, including distinct synthetic/degraded camera cards with only the operational camera exposing recording controls. Real second-camera testing remains hardware-dependent.
 - 2026-07-17: Secret-free backup export, field-redacted validation, optimistic restore, external-secret-reference preservation/derivation, migration drift detection, and OpenAPI secret-surface checks passed 91 backend tests plus 8 expected opt-in skips. Nineteen Playwright flows passed, including file validation before restore. A fresh SQLite upgrade reached `0001_phase3_state`, and `alembic check` reported no new upgrade operations.
+- 2026-07-17: An isolated production Compose project first exposed and then regression-tested missing migration assets in the API image. After packaging migrations and non-root-owned data/media mount points, the clean stack reached migration head. A persisted rule edit (0.73 confidence/45-second debounce), two camera definitions, and event history survived forced API-container replacement with the same named volumes; the post-recreate backup contained no secret references. The synthetic containers, network, database volume, and media volume were deleted after verification.
 
 ### Exit criteria
 
-- [ ] Personal daily-use configuration and history survive restart and migration.
-- [ ] Retention prevents unbounded storage and behaves safely when storage is unavailable/full.
+- [x] Personal daily-use configuration and history survive restart and migration.
+- [x] Retention prevents unbounded storage and behaves safely when storage is unavailable/full.
 - [x] Multiple simulated cameras cannot starve one another; real second-camera testing waits for hardware/configuration.
-- [ ] No export, API, log, or UI surface exposes stored secrets.
+- [x] No export, API, log, or UI surface exposes stored secrets.
 
 ## Phase 3b — Detection category selection (optional stretch goal, pre-auth)
 
