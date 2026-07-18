@@ -6,8 +6,8 @@ This document records Camzilla's current technical direction: deployment targets
 
 ## 1. Deployment Targets
 
-- **Dev machine:** x86, used for day-to-day development. No NPU — inference here runs on CPU (or CUDA if a GPU is available) via standard Ultralytics.
-- **Production target:** Orange Pi 5 (RK3588, Mali G610 GPU, ~6 TOPS NPU). Inference here runs via RKNN on the NPU.
+- **Local-first application target (Phases 1–4):** x86, used for development and production-like operation while viewer, alerting, persistence, advanced configuration, and authentication mature. Inference runs on CPU or CUDA via standard Ultralytics.
+- **Post-auth edge target (Phase 4b):** Orange Pi 5 (RK3588, Mali G610 GPU, ~6 TOPS NPU). The already-authenticated product migrates here and inference runs via RKNN on the NPU.
 - **Design constraint:** the system should also be deployable on plain x86/CPU or Nvidia/CUDA setups for anyone without an Orange Pi — this is a first-class supported path, not just a dev convenience. This is why the inference backend is abstracted (see §3.3).
 - **Future accelerator target:** TPU is a reserved capability category, not a selected implementation. A concrete hardware family, runtime, model format, and validation target must be accepted before a TPU adapter is advertised as available.
 
@@ -19,8 +19,8 @@ This document records Camzilla's current technical direction: deployment targets
 | Python package management | **uv** | |
 | Frontend | **React**; Zustand only where justified | Prefer local/query state first; add a shared client store for genuinely cross-cutting UI state |
 | Service/process model | **Compose service isolation + dedicated inference worker** | Explicit runtime startup; bounded latest-frame queue; no loaded-runtime `fork` assumption |
-| Inference (prod) | **RKNN** (RK3588 NPU) | |
-| Inference (dev / CPU / GPU) | **Ultralytics** (CPU or CUDA) | |
+| Inference (post-auth edge) | **RKNN** (RK3588 NPU) | Phase 4b |
+| Inference (local x86 / CPU / GPU) | **Ultralytics** (CPU or CUDA) | Phases 1–4 |
 | Inference selection | **Capability API + transactional worker switch** | Phase 1b; only verified backend/model/target combinations are selectable |
 | Video bridging (browser) | **WebRTC through `go2rtc`** | HLS/MJPEG is a diagnostic fallback; see §4 |
 | Detection metadata | **Versioned backend WebSocket** | Timestamped normalized boxes rendered over video in the browser |
@@ -88,7 +88,7 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
 - **Development models:** Ultralytics YOLOv8 and YOLO11 detection weights in nano, small, and medium sizes are supported for the Phase 1 CPU/CUDA vertical slice; YOLOv8n remains the default.
   - Each managed weight has a pinned upstream URL and SHA-256 provenance record and is selected by model ID without changing application contracts.
   - Making all six weights available for development supports comparison but is not an Orange Pi deployment decision.
-  - YOLOv8 currently has the more established RKNN tooling path for this project; Phase 2 benchmarks candidate generation, size, and input resolution before selecting the NPU artifact.
+  - YOLOv8 currently has the more established RKNN tooling path for this project; Phase 4b benchmarks candidate generation, size, and input resolution before selecting the NPU artifact.
 - **Selection rule:** choose model size and input resolution from measured accuracy, FPS, latency, memory, and thermal behavior on both development and target hardware. The initial 5–10 inference FPS goal does not require the viewer to run at the same rate.
 - **Operator selection:** Phase 1b exposes only installed and compatible combinations. Ultralytics CPU is the baseline; CUDA, RKNN NPU, and future TPU choices become enabled only after runtime and model-artifact health checks pass.
 - **Detection categories:** Phase 3b optionally exposes the active artifact's class catalog for per-camera and per-alert-rule multi-selection. These are object-detection classes with bounding boxes, not image-classification categories. Filtering and alert evaluation use stable semantic IDs, while adapters own model-native index mapping.
@@ -109,14 +109,14 @@ The RK3588 NPU doesn't hold model weights persistently on-chip — it has small 
 ## 9. Development, Deployment, Security, and CI
 
 - Shared Compose service definitions describe the production-like topology. A development override/watch configuration syncs source into containers, runs Vite HMR and FastAPI/Uvicorn reload, and rebuilds only for dependency/container changes. Production uses immutable images, no source mounts/reloaders, health checks, and explicit restart policy.
-- Phase 1 creates a root `README.md` as the developer/operator entry point. It documents live-reload development, production-like x86 operation, configuration/security, tests, health, troubleshooting, and that supported Orange Pi/RKNN deployment begins in Phase 2.
+- Phase 1 creates a root `README.md` as the developer/operator entry point. It documents live-reload development, production-like x86 operation, configuration/security, tests, health, troubleshooting, and that supported Orange Pi/RKNN deployment begins only in post-auth Phase 4b.
 - Pre-auth phases bind application endpoints to loopback by default; trusted-LAN exposure is explicit. `go2rtc` administration remains internal. Authenticated RTSP URLs and secrets are redacted from logs, errors, health, metrics, browser payloads, and CI artifacts.
 - GitHub Actions runs backend lint/type/tests, frontend lint/type/tests/build, deterministic Playwright flows, secret/privacy checks, Compose validation, and amd64 builds. Physical camera, CUDA, and RKNN tests are opt-in or later self-hosted jobs and skip cleanly when hardware is absent.
 - Real captures, recordings, home-derived calibration images, generated credential-bearing configuration, databases, and large model artifacts are never committed. CI uses synthetic or explicitly redistributable fixtures.
 
 ### 9.1 Persistence Direction
 
-- Phase 3 stores cameras, verified capabilities, alert rules, event metadata, configuration versions, and secret references in SQLite on local Orange Pi storage through SQLAlchemy 2 and Alembic migrations.
+- Phase 3 stores cameras, verified capabilities, alert rules, event metadata, configuration versions, and secret references in SQLite on local x86-host storage through SQLAlchemy 2 and Alembic migrations. Phase 4b migrates and validates that state on local Orange Pi storage after authentication is complete.
 - Snapshots and clips are filesystem objects with database metadata/references. Retention coordinates deletion of both; media is not stored as database blobs.
 - Plaintext credentials and authenticated camera/notifier URLs are not persisted. Database rows refer to environment/external secret identifiers.
 - Keep transaction and repository boundaries portable to PostgreSQL. PostgreSQL becomes appropriate for multiple application instances, a remote/shared database, or sustained concurrent-write pressure; it is not required for the initial single-node deployment.
@@ -128,7 +128,8 @@ The [implementation plan](implementation-plan.md) is authoritative for task stat
 
 1. **Phase 1:** Compose development workflow, one-camera WebRTC viewer, fake then Ultralytics backend, timestamped WebSocket detections, browser bounding-box overlay, tests, and GitHub Actions.
 2. **Phase 1b:** capability-driven model and CPU/GPU/NPU/TPU target selection UI, with transactional switching and unsupported-target explanations.
-3. **Phase 2:** RKNN/Orange Pi deployment and parity, bounded PTZ, Discord snapshot alerts, reconnect/health behavior, and Tripwire completion.
+3. **Phase 2:** local x86 Tripwire completion with bounded PTZ, Discord snapshot alerts, reconnect/health behavior, and sustained CPU/CUDA operation.
 4. **Phase 3:** persistence/history, zones/schedules, clips/retention, configuration/versioning, and multi-camera groundwork—all before auth.
 5. **Phase 3b (optional stretch):** model-provided detection-category selection per camera and alert rule, with cross-model compatibility handling.
 6. **Phase 4:** Keycloak, backend authorization, role boundaries, WebSocket/media protection, and concurrent-edit handling.
+7. **Phase 4b:** authenticated migration to Orange Pi, RKNN parity and NPU selection, ARM64 packaging, hardware validation, and rollback.

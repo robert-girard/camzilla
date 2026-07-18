@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1 complete; Phase 1b planned (model/inference selection UI; Orange Pi deployment remains Phase 2)
+Status: Phase 1 complete; Phase 1b planned (local-first model/inference selection UI; Orange Pi deployment deferred until post-auth Phase 4b)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -22,16 +22,16 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 ## Confirmed decisions
 
 - Phase 1 is a single-camera live viewer with pluggable inference and browser-rendered detection boxes. PTZ and Discord alerts begin in Phase 2.
-- Per the 2026-07-17 development-only direction, Orange Pi image production, RKNN conversion/runtime work, and device deployment remain deferred to Phase 2 and do not block Phase 1.
+- Per the 2026-07-17 local-first direction, Orange Pi image production, RKNN conversion/runtime work, data migration, and device deployment are deferred to post-auth Phase 4b and do not block Phases 1 through 4.
 - Browser video uses `go2rtc` WebRTC. Detection metadata travels separately over a backend WebSocket and is rendered on a canvas overlay. HLS/MJPEG is diagnostic fallback only.
 - Docker Compose is used for development and deployment. Development uses Vite HMR, FastAPI reload, source sync/bind mounts, and dependency-triggered rebuilds.
 - GitHub Actions provides CI for tests, checks, and builds. Deployment automation is deferred.
-- The development MVP uses Ultralytics and supports the COCO detection weights for YOLOv8 and YOLO11 in nano, small, and medium sizes under AGPL-3.0; YOLOv8n remains the low-cost default. Keep inference pluggable to preserve a future replacement/enterprise-license path. Orange Pi/RKNN model selection remains a Phase 2 benchmark decision.
-- Phase 1b adds a browser UI and API for selecting a compatible model and inference target. The server is authoritative for the capability matrix: CPU, GPU, NPU, and TPU are stable target categories, but only installed, verified, healthy backend/model combinations are selectable. Phase 1b makes Ultralytics CPU and available CUDA GPU combinations operational; RKNN NPU becomes selectable when Phase 2 installs it, and TPU remains unavailable until a concrete TPU runtime and adapter are accepted.
+- The development MVP uses Ultralytics and supports the COCO detection weights for YOLOv8 and YOLO11 in nano, small, and medium sizes under AGPL-3.0; YOLOv8n remains the low-cost default. Keep inference pluggable to preserve a future replacement/enterprise-license path. Orange Pi/RKNN model selection remains a Phase 4b benchmark decision.
+- Phase 1b adds a browser UI and API for selecting a compatible model and inference target. The server is authoritative for the capability matrix: CPU, GPU, NPU, and TPU are stable target categories, but only installed, verified, healthy backend/model combinations are selectable. Phase 1b makes Ultralytics CPU and available CUDA GPU combinations operational; RKNN NPU becomes selectable when Phase 4b installs it, and TPU remains unavailable until a concrete TPU runtime and adapter are accepted.
 - Phase 1b selections are single-user, global runtime state initialized from environment defaults and reset on application restart. Phase 3 persists the selection with the rest of global configuration; the unauthenticated Phase 1b UI remains loopback-by-default/trusted-LAN-only.
 - Phase 3b is an optional stretch phase for selecting model-provided object-detection categories beyond `person`. Category choices come from a versioned model class catalog, use stable semantic IDs across backends where equivalence is verified, and must not be confused with a separate image-classification model.
 - No authentication is present until Phase 4. Before then, services bind to loopback by default; LAN access is explicit and documented as trusted-network-only.
-- Phase 1 creates a root `README.md` as the developer/operator entry point, covering development live reload, production-like x86 usage, configuration, security, tests, health, troubleshooting, and the Phase 2 boundary for Orange Pi/RKNN support.
+- Phase 1 creates a root `README.md` as the developer/operator entry point, covering development live reload, production-like x86 usage, configuration, security, tests, health, troubleshooting, and the post-auth Phase 4b boundary for Orange Pi/RKNN support.
 - Persistent relational state uses SQLite on local storage with SQLAlchemy 2 and Alembic. Media remains in filesystem storage, credentials remain in environment/external secrets, and PostgreSQL is a later migration path for multi-instance or write-heavy deployments rather than an initial dependency.
 
 ## Review of the PRD and preliminary design
@@ -65,7 +65,7 @@ go2rtc (internal API only)
                                               v
                                        InferenceBackend
                                        | dev: Ultralytics CPU/CUDA
-                                       ` prod: RKNN (Phase 2)
+                                       ` edge: RKNN (Phase 4b)
                                               |
                                               v
 FastAPI REST/health <--- application state --- WebSocket detections
@@ -118,7 +118,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [x] Document clean-clone one-command startup, physical-camera opt-in, targeted service logs, rebuild conditions, tests, and teardown.
 - [x] Define production-like Compose behavior with immutable images, non-root users where supported, read-only mounts where practical, health checks, restart policies, and no reloaders/source mounts.
 - [x] Create the root `README.md` with a dev quick start (`docker compose` watch, Vite HMR, FastAPI reload), production-like x86 startup, prerequisites, configuration/secrets, ports and trusted-LAN/no-auth warning, test commands, health checks, troubleshooting, shutdown, and CI-safe versus hardware smoke-test guidance.
-- [x] State clearly in the root README that Phase 1 production-like Compose validates packaging and CPU/CUDA operation, while supported Orange Pi/RKNN deployment is delivered and documented in Phase 2.
+- [x] State clearly in the root README that production-like Compose validates local x86 CPU/CUDA operation through Phase 4, while supported Orange Pi/RKNN deployment is delivered and documented in post-auth Phase 4b.
 
 #### Camera and streaming
 
@@ -204,7 +204,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 ### Outcome
 
-From the single-camera page, the operator can inspect the active model and inference target and safely switch to any backend/model combination the server reports as available. Phase 1b delivers functional selection among the six managed YOLO development weights on CPU and on CUDA GPU when present. The same capability-driven UI represents NPU and TPU targets without claiming unsupported hardware: RKNN NPU becomes available through Phase 2, while TPU requires a separately accepted runtime and adapter.
+From the single-camera page, the operator can inspect the active model and inference target and safely switch to any backend/model combination the server reports as available. Phase 1b delivers functional selection among the six managed YOLO development weights on CPU and on CUDA GPU when present. The same capability-driven UI represents NPU and TPU targets without claiming unsupported hardware: RKNN NPU becomes available through post-auth Phase 4b, while TPU requires a separately accepted runtime and adapter.
 
 ### Scope exclusions
 
@@ -236,7 +236,7 @@ No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence
 - [ ] Add Playwright flows for a successful model/CPU switch, capability-gated GPU/NPU/TPU choices, switching state, failed-switch rollback, diagnostics identity, stale-overlay expiry, and metadata recovery.
 - [ ] Update the root README with selection behavior, supported combinations, runtime-only semantics, restart defaults, expected interruption, unavailable-target troubleshooting, and hardware-dependent validation commands.
 - [ ] Extend CI to run the selection contract, integration, frontend, and deterministic Playwright tests without requiring model binaries or accelerator hardware.
-- [ ] When Phase 2 adds RKNN, register its verified model artifacts in this capability contract and make NPU choices selectable without changing the Phase 1b API or UI contract.
+- [ ] When Phase 4b adds RKNN, register its verified model artifacts in this capability contract and make NPU choices selectable without changing the Phase 1b API or UI contract.
 
 ### Exit criteria
 
@@ -247,25 +247,13 @@ No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence
 - [ ] Video remains available during a switch, stale detections are cleared, and metadata/diagnostics recover with the newly confirmed identity.
 - [ ] Backend, frontend, integration, Playwright, build, and security checks pass in hardware-independent CI; accelerator-specific checks have documented opt-in results and skip behavior.
 
-## Phase 2 — Complete Tripwire and deploy to the Orange Pi (pre-auth)
+## Phase 2 — Complete Tripwire locally on x86 (pre-auth)
 
 ### Outcome
 
-The first camera runs reliably on the Orange Pi using RKNN, offers safe timed PTZ controls, and produces debounced Discord person alerts with redacted snapshots. This completes the practical Tripwire tier while remaining trusted-LAN-only.
+The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first camera offers safe timed PTZ controls and produces debounced Discord person alerts with redacted snapshots using Ultralytics CPU or available CUDA inference. Orange Pi packaging and RKNN are deliberately excluded until after authentication and the more advanced local features are complete.
 
 ### Tasks
-
-#### RKNN deployment
-
-- [ ] Inventory Orange Pi OS/kernel, NPU driver/runtime, Python, Docker/Compose, storage, thermals, and architecture without collecting device identifiers.
-- [ ] Pin a compatible RKNN toolkit/runtime/driver matrix and document the model conversion environment separately from the ARM64 runtime.
-- [ ] Export and quantize the selected YOLO model with a redistributable calibration dataset; record source, license, checksum, input shape, and conversion settings.
-- [ ] Implement the RKNN backend behind the Phase 1 contract with explicit initialization and shutdown; do not rely on forked runtime state.
-- [ ] Register each verified RKNN model artifact and its NPU compatibility in the Phase 1b capability API so the existing selector can activate it without frontend special cases.
-- [ ] Add golden-image parity tests between Ultralytics and RKNN with documented numerical/detection tolerances.
-- [ ] Produce multi-architecture Compose images or architecture-specific inference targets without emulating NPU tests in CI.
-- [ ] Benchmark FPS, end-to-end latency, memory, NPU utilization, CPU decode, temperature, and sustained operation; choose nano/small and input size from evidence.
-- [ ] Add an opt-in/self-hosted hardware test path; keep GitHub-hosted CI hardware-independent.
 
 #### PTZ
 
@@ -285,15 +273,15 @@ The first camera runs reliably on the Orange Pi using RKNN, offers safe timed PT
 - [ ] Provide a dry-run notifier and require explicit confirmation/configuration before sending real alerts.
 - [ ] Test debounce boundaries, duplicate suppression, attachment limits, retry policy, reconnect, secret redaction, and notifier failure isolation.
 - [ ] Add Playwright coverage for PTZ states, alert rule display/dry-run, degraded health, and recovery.
+- [ ] Run a sustained production-like x86 smoke through service restart using CPU and available CUDA, recording latency, throughput, memory, and recovery behavior without retaining private media.
 
 ### Exit criteria
 
-- [ ] Orange Pi runs the stack through reboot/restart and sustains the agreed performance/thermal envelope.
-- [ ] RKNN and development backends satisfy the same contract and acceptable parity thresholds.
-- [ ] The Phase 1b selector reports and successfully applies the supported RKNN NPU model combinations on the Orange Pi while keeping incompatible development weights unavailable with a reason.
+- [ ] The production-like x86 stack survives service restart and sustains the agreed CPU/CUDA performance envelope without unbounded latency or queues.
+- [ ] The Phase 1b selector applies supported Ultralytics CPU/CUDA combinations while NPU and TPU remain explicitly unavailable.
 - [ ] Browser PTZ performs short bounded moves without requiring `Stop`.
 - [ ] A qualifying detection emits at most one Discord alert per debounce window with an annotated snapshot, and dry-run mode emits none.
-- [ ] Automated tests pass; hardware-only checks have documented results and skip semantics.
+- [ ] Automated tests pass; camera/CUDA-only checks have documented results and skip semantics.
 
 ## Phase 3 — Operability, history, and multi-camera groundwork (pre-auth)
 
@@ -383,6 +371,50 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 - [ ] Role enforcement and concurrent-edit protection pass backend and browser tests.
 - [ ] Keycloak outage/rotation behavior fails safely and recovery is documented.
 
+## Phase 4b — Authenticated Orange Pi and RKNN deployment
+
+### Outcome
+
+After the local x86 product, persistence, and authentication flows are stable, the authenticated system is deployed to the Orange Pi with RKNN NPU inference. Existing cameras, configuration, history, media, permissions, alerts, and optional Phase 3b category selections migrate without weakening security or changing application contracts.
+
+### Entry conditions
+
+- Phase 4 authentication and server-side authorization exit criteria are complete.
+- Phase 3 persistence, backup/restore, retention, and disk-full behavior are complete on x86.
+- Phase 3b is optional; if implemented, its category catalog and selections must also pass RKNN compatibility and migration tests.
+
+### Tasks
+
+#### RKNN backend and packaging
+
+- [ ] Inventory Orange Pi OS/kernel, NPU driver/runtime, Python, Docker/Compose, storage, thermals, and architecture without collecting device identifiers.
+- [ ] Pin a compatible RKNN toolkit/runtime/driver matrix and document the x86 model-conversion environment separately from the ARM64 runtime.
+- [ ] Export and quantize the selected YOLO model with a redistributable calibration dataset; record source, license, checksum, input shape, conversion settings, and class catalog.
+- [ ] Implement the RKNN backend behind the Phase 1 contract with explicit initialization and shutdown; do not rely on forked runtime state.
+- [ ] Register each verified RKNN model artifact and its NPU compatibility in the Phase 1b capability API so the existing selector can activate it without frontend special cases.
+- [ ] Add golden-image parity tests between Ultralytics and RKNN with documented numerical, coordinate, class-catalog, and detection tolerances.
+- [ ] Produce architecture-specific or multi-architecture production images without installing x86 conversion tooling in the ARM64 runtime or emulating NPU tests in GitHub-hosted CI.
+- [ ] Benchmark FPS, end-to-end latency, memory, NPU utilization, CPU decode, temperature, and sustained operation; choose model generation/size and input resolution from evidence.
+- [ ] Add an opt-in or self-hosted Orange Pi hardware test path; keep GitHub-hosted CI hardware-independent.
+
+#### Authenticated migration and operations
+
+- [ ] Document and test backup, transfer, restore, schema migration, media validation, and rollback from the authenticated x86 deployment to local Orange Pi storage without copying plaintext secrets or generated credential-bearing configuration.
+- [ ] Provide a production Compose deployment for ARM64/RKNN with immutable images, explicit health checks, restart policy, bounded resource settings, no source mounts/reloaders, and no directly exposed `go2rtc` administration.
+- [ ] Validate Keycloak login, JWT/JWKS behavior, role enforcement, WebSocket/media authorization, PTZ, alerts, history, clips, configuration, and detailed-health restrictions on the Orange Pi deployment.
+- [ ] Validate reboot recovery, camera/restream/inference/notifier reconnection, database/media consistency, retention, disk-full handling, and safe failure when the NPU runtime is unavailable.
+- [ ] Document an operator migration checklist and a tested rollback to the last healthy authenticated x86 deployment.
+- [ ] Update the root README with supported Orange Pi prerequisites, image/runtime selection, deployment, migration, backup, rollback, health, performance/thermal limits, troubleshooting, and hardware smoke commands.
+
+### Exit criteria
+
+- [ ] The authenticated Orange Pi stack survives reboot/restart and sustained operation within the agreed performance, memory, storage, and thermal envelope.
+- [ ] RKNN and Ultralytics satisfy the same inference contract and acceptable parity thresholds, including class identities and normalized coordinates.
+- [ ] The Phase 1b selector reports and applies supported RKNN NPU model combinations while keeping incompatible artifacts unavailable with an actionable reason.
+- [ ] Existing persisted configuration, history, media references, rules, permissions, and implemented category selections migrate and restore successfully, with a tested x86 rollback path.
+- [ ] Anonymous access remains blocked across every direct service route, and authenticated browser/API behavior matches the Phase 4 authorization contract.
+- [ ] Automated tests pass; Orange Pi/NPU-only checks have documented results, opt-in execution, and clear skip semantics.
+
 ## Phase 5 and deferred work
 
 - [ ] False-positive feedback and threshold-tuning workflow.
@@ -393,7 +425,7 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 - [ ] Multi-camera subject correlation and advanced dashboard visualizations.
 - [ ] Additional notifiers and external storage backends.
 - [ ] Select a concrete TPU hardware family and runtime, then implement and contract-test its inference adapter and model-artifact pipeline; register it with the Phase 1b capability API only after hardware validation.
-- [ ] Image publishing, signed artifacts/SBOMs, Orange Pi deployment workflow, rollback, and release automation.
+- [ ] Image publishing, signed artifacts/SBOMs, automated rollout/rollback, and release automation beyond the documented Phase 4b manual deployment.
 
 ## Security hygiene completed during planning
 
@@ -409,7 +441,7 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 
 - [ ] Choose the repository copyright holder/notice for the AGPL-3.0 license.
 - [ ] Confirm dev machine OS, CPU/GPU/CUDA availability, RAM, and expected browsers.
-- [ ] Confirm Orange Pi OS image, NPU driver/runtime state, RAM, storage, and whether it is available during Phase 2.
+- [ ] Confirm Orange Pi OS image, NPU driver/runtime state, RAM, storage, and whether it is available during Phase 4b.
 - [ ] Choose the intended TPU hardware/runtime (for example, an Edge TPU/TFLite-class target) before planning adapter implementation; `tpu` remains an unavailable capability category until then.
 - [x] Measure `PROFILE_001` and decide whether inference uses the substream or a downscaled main-stream restream.
 - [ ] Set numeric Phase 1 targets after the first baseline: acceptable view latency, detection age, inference FPS, and CPU/GPU usage.

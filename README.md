@@ -3,8 +3,9 @@
 Camzilla is a self-hosted camera viewer with pluggable object detection. Phase 1
 is a single-camera, trusted-LAN-only vertical slice: WebRTC viewing via `go2rtc`,
 browser-rendered detection metadata, and x86 CPU/CUDA development inference.
-Supported Orange Pi/RKNN deployment, PTZ, alerts, recording, persistence,
-multi-camera operation, and authentication begin in later phases.
+PTZ, alerts, persistence, multi-camera operation, and authentication are built
+and validated locally on x86 first. Supported Orange Pi/RKNN deployment follows
+authentication in Phase 4b.
 
 ## Prerequisites
 
@@ -103,8 +104,9 @@ docker compose ps
 curl http://127.0.0.1:8000/health/ready
 ```
 
-This validates x86 packaging and CPU/CUDA operation. Orange Pi/RKNN is a Phase 2
-deliverable, not a supported Phase 1 production target.
+This validates the local-first x86 packaging and CPU/CUDA operation used through
+Phase 4. Orange Pi/RKNN is a post-auth Phase 4b deliverable, not a currently
+supported production target.
 
 ## Checks
 
