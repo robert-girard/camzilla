@@ -16,7 +16,7 @@ The system is designed around pluggable abstractions (cameras, notifiers, infere
 - Configurable, class-combination-aware alerting (not just single-object triggers).
 - Rich alerts: text + snapshot/video attachments delivered to Discord (and other notifiers later).
 - Live viewing and recorded playback of camera feeds.
-- Architecture that supports multiple cameras, multiple camera *types*, multiple notifier types, and multiple inference backends (NPU, CPU, GPU) without rearchitecting later.
+- Architecture that supports multiple cameras, multiple camera *types*, multiple notifier types, and operator-selectable inference backends/targets (CPU, GPU, NPU, and future TPU) without rearchitecting later.
 - Runs on constrained edge hardware (Orange Pi 5, RK3588 NPU) but is not hard-locked to it — CPU/CUDA deployment should also be viable.
 
 ## 3. Non-Goals (for now)
@@ -37,7 +37,7 @@ To keep scope honest and incremental, features are grouped into four tiers:
 | 3 | **Command Center** | Keycloak auth, role enforcement, concurrent-edit safety, protected media/control paths, config backup/export, and false-positive feedback. |
 | 4 | **Skynet** (pie-in-the-sky) | Multi-camera correlation, ONVIF Profile G edge-storage integration, advanced dashboard visualizations (timelines, sunbursts), dwell-time/theft detection. |
 
-Implementation phases are intentionally smaller than release tiers. [Implementation Phase 1](implementation-plan.md#phase-1--live-detection-vertical-slice-first-goal) establishes live WebRTC viewing and development-machine detection. [Phase 2](implementation-plan.md#phase-2--complete-tripwire-and-deploy-to-the-orange-pi-pre-auth) adds RKNN, PTZ, Discord alerts, and reliability to complete Tripwire. [Phase 3](implementation-plan.md#phase-3--operability-history-and-multi-camera-groundwork-pre-auth) builds Stakeout capabilities before [Phase 4](implementation-plan.md#phase-4--keycloak-authentication-and-concurrent-administration) introduces Keycloak.
+Implementation phases are intentionally smaller than release tiers. [Implementation Phase 1](implementation-plan.md#phase-1--live-detection-vertical-slice-first-goal) establishes live WebRTC viewing and development-machine detection. [Phase 1b](implementation-plan.md#phase-1b--model-and-inference-target-selection-ui-pre-auth) adds capability-driven model and inference-target selection. [Phase 2](implementation-plan.md#phase-2--complete-tripwire-and-deploy-to-the-orange-pi-pre-auth) adds RKNN, PTZ, Discord alerts, and reliability to complete Tripwire. [Phase 3](implementation-plan.md#phase-3--operability-history-and-multi-camera-groundwork-pre-auth) builds Stakeout capabilities; optional [Phase 3b](implementation-plan.md#phase-3b--detection-category-selection-optional-stretch-goal-pre-auth) adds model-provided detection-category selection before [Phase 4](implementation-plan.md#phase-4--keycloak-authentication-and-concurrent-administration) introduces Keycloak.
 
 ## 5. Core Abstractions
 
@@ -45,7 +45,7 @@ These are foundational design decisions that should be in place from the start, 
 
 1. **Camera abstraction** — a base interface (stream access) plus optional capability interfaces cameras may or may not support: PTZ control, IR/light toggle, ONVIF Profile G edge storage (recording control + playback). First implementation: ONVIF/RTSP.
 2. **Notifier abstraction** — a generic interface accepting an alert payload (see §6.4) so new notification channels (email, SMS, push) can be added as adapters. First implementation: Discord webhook.
-3. **Inference backend abstraction** — a generic "run detection on a frame" interface with swappable backends: RKNN (Orange Pi NPU), and standard Ultralytics CPU/CUDA (x86 dev machine, GPU deployments).
+3. **Inference backend abstraction** — a generic "run detection on a frame" interface with swappable backends: RKNN (Orange Pi NPU), standard Ultralytics CPU/CUDA (x86 dev machine, GPU deployments), and future TPU adapters after a concrete target is selected and validated. The server exposes verified backend/model/target capabilities so the UI never treats an advertised but unusable combination as selectable.
 
 ## 6. Feature Set
 
@@ -66,6 +66,9 @@ These are foundational design decisions that should be in place from the start, 
 
 ### 6.3 Detection & Alerts
 - Detection runs via the pluggable inference backend (§5) against each active camera stream.
+- A single global operator control selects the model and inference target from combinations the server verifies as installed, compatible, and healthy. CPU, GPU, NPU, and TPU are stable UI categories; unavailable targets remain visible with a reason and cannot be silently downgraded.
+- Selection is runtime-only and initialized from deployment defaults until Tier 2 persistence is delivered. Phase 1b enables CPU and available CUDA GPU choices; Phase 2 enables verified RKNN NPU choices. TPU requires a separately scoped hardware/runtime adapter.
+- **Phase 3b stretch:** each active model exposes a verified object-detection class catalog, and the operator may select one or more available categories per camera and alert rule. `person` remains the default; unsupported categories cannot be invented or silently remapped when the model changes.
 - **Alert definitions:**
   - Composed of one or more target object classes (e.g. "person", "parcel").
   - Assignable to one or more cameras.
@@ -124,6 +127,8 @@ These are foundational design decisions that should be in place from the start, 
 ## 8. Model / Detection Notes (background, informs design doc)
 
 - Ultralytics YOLOv8 and YOLO11 COCO detection weights in nano, small, and medium sizes are selectable for development CPU/CUDA inference. YOLOv8n remains the default because it has the lowest development compute cost. RKNN parity and the supported production model are selected from Orange Pi measurements in implementation Phase 2; development availability does not imply NPU suitability.
+- The selection UI is capability-driven rather than a promise that every model runs on every target. It may show CPU, GPU, NPU, and TPU categories, but it enables only verified backend/model artifacts and gives an explicit reason for unavailable combinations.
+- Phase 3b category selection refers to object-detection classes emitted with boxes and confidence values, not a separate image-classification model. Cross-model selections use verified semantic IDs rather than assuming equal numeric class indices or similar labels are equivalent.
 - Camzilla will use Ultralytics under AGPL-3.0 for the MVP. Code, weights, datasets, and generated model artifacts require recorded license provenance and checksums.
 - COCO-pretrained models cover "person" well but have no generic "package/box" class — a fine-tuned model (e.g. via Ultralytics' package segmentation dataset or Roboflow community datasets) will be needed for parcel detection.
 - Target performance envelope: near-real-time (5–10 fps acceptable) across multiple camera streams on the Orange Pi 5's NPU (~6 TOPS).
@@ -139,7 +144,15 @@ These are foundational design decisions that should be in place from the start, 
 - Backend, frontend, integration, Playwright, build, and security checks run in GitHub Actions without physical-camera access or secrets.
 - No PTZ, Discord alert, persistence, recording, multi-camera UI, or authentication is required for this first slice.
 
-### MVP Release (Tripwire; Implementation Phases 1–2)
+### Inference Selection Slice (Implementation Phase 1b)
+
+- The single-camera page displays the active model, backend, and CPU/GPU/NPU/TPU target category and can apply any combination the server reports as available.
+- All six managed YOLO development weights can be selected for CPU inference; CUDA GPU choices are enabled only when CUDA is verified available.
+- NPU and TPU choices are capability-gated: RKNN becomes selectable after Phase 2 hardware work, while TPU remains unavailable until a concrete adapter and model pipeline are validated.
+- Switching is transactional: a failed load or warm-up retains the last healthy inference backend, stale detections are cleared, and the confirmed identity is reflected in health and detection metadata.
+- The unauthenticated selection is global, runtime-only, loopback-by-default, and does not accept arbitrary model uploads, URLs, or filesystem paths.
+
+### MVP Release (Tripwire; Implementation Phases 1, 1b, and 2)
 
 - Live view of the camera stream works in-browser.
 - PTZ control works from the browser.
@@ -147,3 +160,10 @@ These are foundational design decisions that should be in place from the start, 
 - Detection runs against the same pluggable inference contract on Ultralytics CPU/CUDA and RKNN.
 - Camera, streaming, inference, and notifier failures reconnect or fail safely without unbounded queues or alert storms.
 - No authentication required (temporary, pending Keycloak).
+
+### Detection Category Selection Stretch (Implementation Phase 3b)
+
+- The active model's verified class catalog drives per-camera and per-alert-rule multi-select controls, allowing supported categories beyond `person`.
+- Overlay publication, events, snapshots/clips, and alert evaluation consistently honor the saved category selections.
+- Model/backend changes preserve categories only through verified stable semantic IDs and require explicit resolution for unsupported selections.
+- Category selections persist, migrate, export, and restore without exposing secrets or losing the model/catalog revision needed to interpret historical events.

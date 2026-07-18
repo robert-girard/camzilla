@@ -9,6 +9,7 @@ This document records Camzilla's current technical direction: deployment targets
 - **Dev machine:** x86, used for day-to-day development. No NPU — inference here runs on CPU (or CUDA if a GPU is available) via standard Ultralytics.
 - **Production target:** Orange Pi 5 (RK3588, Mali G610 GPU, ~6 TOPS NPU). Inference here runs via RKNN on the NPU.
 - **Design constraint:** the system should also be deployable on plain x86/CPU or Nvidia/CUDA setups for anyone without an Orange Pi — this is a first-class supported path, not just a dev convenience. This is why the inference backend is abstracted (see §3.3).
+- **Future accelerator target:** TPU is a reserved capability category, not a selected implementation. A concrete hardware family, runtime, model format, and validation target must be accepted before a TPU adapter is advertised as available.
 
 ## 2. Tech Stack Summary
 
@@ -20,6 +21,7 @@ This document records Camzilla's current technical direction: deployment targets
 | Service/process model | **Compose service isolation + dedicated inference worker** | Explicit runtime startup; bounded latest-frame queue; no loaded-runtime `fork` assumption |
 | Inference (prod) | **RKNN** (RK3588 NPU) | |
 | Inference (dev / CPU / GPU) | **Ultralytics** (CPU or CUDA) | |
+| Inference selection | **Capability API + transactional worker switch** | Phase 1b; only verified backend/model/target combinations are selectable |
 | Video bridging (browser) | **WebRTC through `go2rtc`** | HLS/MJPEG is a diagnostic fallback; see §4 |
 | Detection metadata | **Versioned backend WebSocket** | Timestamped normalized boxes rendered over video in the browser |
 | Detection model | **YOLOv8/YOLO11 n/s/m in development; YOLOv8n default** | Orange Pi production selection remains measurement-driven; see §6 |
@@ -46,8 +48,12 @@ The system is built around three interfaces so that no single vendor, protocol, 
 ### 3.3 Inference Backend Abstraction
 - Lifecycle: load/warm up, detect, report health/identity, and close.
 - Detection output: normalized bounding boxes, class, confidence, source dimensions, capture/result timestamps, and timing/backend/model metadata.
-- Implementations: RKNN backend (Orange Pi NPU), Ultralytics CPU/CUDA backend (dev machine, generic x86/GPU deployments).
+- Implementations: RKNN backend (Orange Pi NPU), Ultralytics CPU/CUDA backend (dev machine, generic x86/GPU deployments), and a future TPU adapter only after its concrete runtime is chosen and validated.
 - Build and contract-test a deterministic fake before wiring real detection, then require every backend to pass the same contract suite.
+- Each backend publishes a capability matrix of stable backend, model, target, and model-artifact IDs plus compatibility, availability, health, and redacted unavailability reasons. CPU, GPU, NPU, and TPU are target categories; the category alone never proves a usable runtime.
+- Phase 1b switching is serialized and transactional. Intake pauses while a candidate worker loads and warms, the active reference changes only after success, stale queued/results are cleared, and the previous healthy worker is retained or restored on failure. Environment configuration remains the restart default until Phase 3 persists the shared selection.
+- The browser may request only allowlisted capability IDs. It cannot supply model paths, remote URLs, runtime arguments, credentials, or arbitrary backend names.
+- Each model artifact may publish a versioned object-detection class catalog. Phase 3b stores selections by verified semantic ID, maps them to model-native class IDs inside the adapter, and treats a changed or missing mapping as a configuration conflict rather than guessing from numeric indices or display labels.
 
 ### 3.4 Stream Fan-out and Application Boundary
 
@@ -75,6 +81,7 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
 - Phase 1 begins with one camera and one inference worker. Multi-camera work adds a measured scheduler or configurable worker pool only after memory, decode, throughput, and fairness measurements.
 - The frame sampler submits at a configured target rate. It must keep draining the source between samples rather than sleeping between decoder reads, because decoder-internal buffering would otherwise bypass latest-frame-wins semantics. A size-one or small bounded queue exposes processed, dropped, failed, and latency metrics.
 - Service/process shutdown must close streams and runtimes explicitly. RKNN initialization/shutdown behavior is validated on the Orange Pi rather than inferred from x86 behavior.
+- Runtime model/target changes use the same explicit lifecycle. A switch lock prevents concurrent workers from racing; video stays independent, while detection readiness reports the transition and resumes only after the new identity is confirmed.
 
 ## 6. Detection Model Notes
 
@@ -83,6 +90,8 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
   - Making all six weights available for development supports comparison but is not an Orange Pi deployment decision.
   - YOLOv8 currently has the more established RKNN tooling path for this project; Phase 2 benchmarks candidate generation, size, and input resolution before selecting the NPU artifact.
 - **Selection rule:** choose model size and input resolution from measured accuracy, FPS, latency, memory, and thermal behavior on both development and target hardware. The initial 5–10 inference FPS goal does not require the viewer to run at the same rate.
+- **Operator selection:** Phase 1b exposes only installed and compatible combinations. Ultralytics CPU is the baseline; CUDA, RKNN NPU, and future TPU choices become enabled only after runtime and model-artifact health checks pass.
+- **Detection categories:** Phase 3b optionally exposes the active artifact's class catalog for per-camera and per-alert-rule multi-selection. These are object-detection classes with bounding boxes, not image-classification categories. Filtering and alert evaluation use stable semantic IDs, while adapters own model-native index mapping.
 - **Package/parcel detection:** COCO pretraining does not include a generic "package" class. Plan is to fine-tune a nano/small YOLO model using a labeled dataset (Ultralytics' package segmentation dataset, and/or a Roboflow community dataset) — no adequate pretrained package-specific model found on Hugging Face at time of research. Training workflow is a separate task to scope later.
 - **Detection type:** standard object detection (bounding boxes + class + confidence), not segmentation — sufficient for zone/overlap-based alert logic (e.g. person+parcel proximity) at lower compute cost than pixel-mask segmentation.
 - **Licensing:** Ultralytics is accepted under AGPL-3.0 for the MVP. The repository must add the compatible project license and attribution before adding the dependency. Record license/source/checksum provenance independently for code, weights, datasets, calibration inputs, and generated RKNN artifacts.
@@ -118,6 +127,8 @@ The RK3588 NPU doesn't hold model weights persistently on-chip — it has small 
 The [implementation plan](implementation-plan.md) is authoritative for task status and exit criteria:
 
 1. **Phase 1:** Compose development workflow, one-camera WebRTC viewer, fake then Ultralytics backend, timestamped WebSocket detections, browser bounding-box overlay, tests, and GitHub Actions.
-2. **Phase 2:** RKNN/Orange Pi deployment and parity, bounded PTZ, Discord snapshot alerts, reconnect/health behavior, and Tripwire completion.
-3. **Phase 3:** persistence/history, zones/schedules, clips/retention, configuration/versioning, and multi-camera groundwork—all before auth.
-4. **Phase 4:** Keycloak, backend authorization, role boundaries, WebSocket/media protection, and concurrent-edit handling.
+2. **Phase 1b:** capability-driven model and CPU/GPU/NPU/TPU target selection UI, with transactional switching and unsupported-target explanations.
+3. **Phase 2:** RKNN/Orange Pi deployment and parity, bounded PTZ, Discord snapshot alerts, reconnect/health behavior, and Tripwire completion.
+4. **Phase 3:** persistence/history, zones/schedules, clips/retention, configuration/versioning, and multi-camera groundwork—all before auth.
+5. **Phase 3b (optional stretch):** model-provided detection-category selection per camera and alert rule, with cross-model compatibility handling.
+6. **Phase 4:** Keycloak, backend authorization, role boundaries, WebSocket/media protection, and concurrent-edit handling.

@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1 complete (x86 development scope; Orange Pi deployment deferred to Phase 2)
+Status: Phase 1 complete; Phase 1b planned (model/inference selection UI; Orange Pi deployment remains Phase 2)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -14,7 +14,7 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 - Update task state in the same change that produces or verifies the work.
 - A phase is complete only when all required tasks and exit criteria are complete. Tasks explicitly marked optional do not block completion.
 - Add discoveries beneath the phase they affect. Put cross-cutting decisions in the decision log and meaningful design changes in ADRs.
-- Phase 1 is the intended first `/goal`. Do not pull PTZ, alerts, recording, or authentication into it.
+- Phase 1 is complete. Phase 1b is the next intended `/goal`; do not pull PTZ, alerts, recording, persistence, or authentication into it.
 - Mark work `[~]` when it begins and `[x]` only after implementation and validation. Use `[!]` with an unblock condition for genuine blockers.
 - Split partially completed compound tasks instead of marking them complete. Preserve completed tasks and commit status updates with their implementation/tests.
 - Update `Last updated` whenever task state, phase scope, decisions, or exit criteria materially change.
@@ -27,13 +27,16 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 - Docker Compose is used for development and deployment. Development uses Vite HMR, FastAPI reload, source sync/bind mounts, and dependency-triggered rebuilds.
 - GitHub Actions provides CI for tests, checks, and builds. Deployment automation is deferred.
 - The development MVP uses Ultralytics and supports the COCO detection weights for YOLOv8 and YOLO11 in nano, small, and medium sizes under AGPL-3.0; YOLOv8n remains the low-cost default. Keep inference pluggable to preserve a future replacement/enterprise-license path. Orange Pi/RKNN model selection remains a Phase 2 benchmark decision.
+- Phase 1b adds a browser UI and API for selecting a compatible model and inference target. The server is authoritative for the capability matrix: CPU, GPU, NPU, and TPU are stable target categories, but only installed, verified, healthy backend/model combinations are selectable. Phase 1b makes Ultralytics CPU and available CUDA GPU combinations operational; RKNN NPU becomes selectable when Phase 2 installs it, and TPU remains unavailable until a concrete TPU runtime and adapter are accepted.
+- Phase 1b selections are single-user, global runtime state initialized from environment defaults and reset on application restart. Phase 3 persists the selection with the rest of global configuration; the unauthenticated Phase 1b UI remains loopback-by-default/trusted-LAN-only.
+- Phase 3b is an optional stretch phase for selecting model-provided object-detection categories beyond `person`. Category choices come from a versioned model class catalog, use stable semantic IDs across backends where equivalence is verified, and must not be confused with a separate image-classification model.
 - No authentication is present until Phase 4. Before then, services bind to loopback by default; LAN access is explicit and documented as trusted-network-only.
 - Phase 1 creates a root `README.md` as the developer/operator entry point, covering development live reload, production-like x86 usage, configuration, security, tests, health, troubleshooting, and the Phase 2 boundary for Orange Pi/RKNN support.
 - Persistent relational state uses SQLite on local storage with SQLAlchemy 2 and Alembic. Media remains in filesystem storage, credentials remain in environment/external secrets, and PostgreSQL is a later migration path for multi-instance or write-heavy deployments rather than an initial dependency.
 
 ## Review of the PRD and preliminary design
 
-The PRD's Tripwire success criteria are broader than the requested first implementation slice. This plan treats Phase 1 as a technical vertical slice and Phase 2 as completion of Tripwire; the PRD now records that mapping explicitly.
+The PRD's Tripwire success criteria are broader than the requested first implementation slice. This plan treats Phase 1 as a technical vertical slice, Phase 1b as operator-selectable inference configuration, and Phase 2 as completion of Tripwire; the PRD now records that mapping explicitly.
 
 The preliminary design was reconciled with these corrections and additions:
 
@@ -197,6 +200,53 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - 2026-07-12: The production-style amd64 API image loaded the checksum-verified YOLOv8n weight on CPU and detected `person` (top confidence 0.87) from a public, temporary fixture; neither weight nor fixture was committed. In the no-camera synthetic pipeline it reported 5.0 inference FPS, 31.0 ms most-recent inference, zero failures, and zero dropped frames. The backend records CPU fallback when CUDA is unavailable.
 - 2026-07-12: The no-camera Compose stack ran with deterministic fake frames. Chromium verified connected detection metadata, an SVG `person` overlay, diagnostics, and the degraded WebRTC state. The real-camera work that remained at that point was completed by the 2026-07-17 smoke evidence above.
 
+## Phase 1b — Model and inference target selection UI (pre-auth)
+
+### Outcome
+
+From the single-camera page, the operator can inspect the active model and inference target and safely switch to any backend/model combination the server reports as available. Phase 1b delivers functional selection among the six managed YOLO development weights on CPU and on CUDA GPU when present. The same capability-driven UI represents NPU and TPU targets without claiming unsupported hardware: RKNN NPU becomes available through Phase 2, while TPU requires a separately accepted runtime and adapter.
+
+### Scope exclusions
+
+No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence, recording, multi-camera orchestration, authentication, arbitrary model upload, remote model URL, or browser-supplied filesystem path. A Phase 1b selection is global runtime state and returns to the environment-configured default after application restart.
+
+### Tasks
+
+#### Selection contracts and lifecycle
+
+- [ ] Define a backend-neutral inference capability contract containing stable backend, model, and target IDs; target category (`cpu`, `gpu`, `npu`, or `tpu`); compatibility; availability; unavailability reason; active state; and backend/model metadata.
+- [ ] Expose typed endpoints to read capabilities and the active selection and to request a supported selection; reject unknown, unavailable, unhealthy, or incompatible combinations without accepting arbitrary paths, URLs, or secret-bearing values.
+- [ ] Enumerate all six managed YOLO development weights for Ultralytics CPU and for CUDA GPU only when CUDA is verified available; report a redacted, actionable reason for every unavailable GPU, NPU, or TPU option.
+- [ ] Serialize concurrent selection requests and implement a transactional worker switch: stop intake, initialize and warm the candidate, atomically publish it only on success, close the previous backend after the swap, and retain or restore the previous healthy backend on failure.
+- [ ] Reset bounded queues and detection sequence state across a successful switch so results from the previous model/target cannot be presented as current; keep video available and report an explicit switching/degraded state.
+- [ ] Keep environment variables as restart defaults and store the selected combination only in memory until Phase 3 persistence is implemented.
+- [ ] Update health, readiness, diagnostics, and detection metadata immediately after a successful switch with the active backend, target, model, device, fallback, and transition status.
+
+#### Frontend
+
+- [ ] Add accessible model and inference-target controls to the single-camera page, showing CPU, GPU, NPU, and TPU categories, the active combination, loading/switching state, and clear reasons for unavailable or incompatible choices.
+- [ ] Require an explicit apply action, preserve the displayed active selection until the server confirms the swap, and show recoverable failure feedback when warm-up or switching fails.
+- [ ] Keep the overlay and diagnostics coherent during switching: expire old detections, reconnect metadata when required, and display the confirmed backend/model/target identity returned by the server.
+- [ ] Explain in the UI that the selection is global and runtime-only through Phase 2 and that unavailable hardware requires its corresponding backend/runtime rather than a browser setting.
+
+#### Tests, documentation, and integration gates
+
+- [ ] Unit-test capability/compatibility validation, stable IDs, unavailable reasons, concurrent request serialization, transition state, queue/result reset, successful cleanup, failed warm-up rollback, and redaction.
+- [ ] Integration-test CPU model switching through the running pipeline and deterministic fake capability fixtures for CPU, GPU, NPU, and TPU; keep CUDA/RKNN/TPU hardware tests opt-in with clear skip semantics.
+- [ ] Add Playwright flows for a successful model/CPU switch, capability-gated GPU/NPU/TPU choices, switching state, failed-switch rollback, diagnostics identity, stale-overlay expiry, and metadata recovery.
+- [ ] Update the root README with selection behavior, supported combinations, runtime-only semantics, restart defaults, expected interruption, unavailable-target troubleshooting, and hardware-dependent validation commands.
+- [ ] Extend CI to run the selection contract, integration, frontend, and deterministic Playwright tests without requiring model binaries or accelerator hardware.
+- [ ] When Phase 2 adds RKNN, register its verified model artifacts in this capability contract and make NPU choices selectable without changing the Phase 1b API or UI contract.
+
+### Exit criteria
+
+- [ ] The browser can switch among installed, checksum-verified managed YOLO weights on CPU, and the active model identity in health and detection messages matches the confirmed selection.
+- [ ] CUDA GPU is selectable only when verified available; CPU remains usable when CUDA is absent or a GPU switch fails.
+- [ ] CPU, GPU, NPU, and TPU are represented consistently, with unsupported combinations disabled and explained rather than accepted and silently downgraded.
+- [ ] A failed or racing switch cannot leave two active workers, leak a loaded runtime, expose a secret/path, or replace the last healthy backend.
+- [ ] Video remains available during a switch, stale detections are cleared, and metadata/diagnostics recover with the newly confirmed identity.
+- [ ] Backend, frontend, integration, Playwright, build, and security checks pass in hardware-independent CI; accelerator-specific checks have documented opt-in results and skip behavior.
+
 ## Phase 2 — Complete Tripwire and deploy to the Orange Pi (pre-auth)
 
 ### Outcome
@@ -211,6 +261,7 @@ The first camera runs reliably on the Orange Pi using RKNN, offers safe timed PT
 - [ ] Pin a compatible RKNN toolkit/runtime/driver matrix and document the model conversion environment separately from the ARM64 runtime.
 - [ ] Export and quantize the selected YOLO model with a redistributable calibration dataset; record source, license, checksum, input shape, and conversion settings.
 - [ ] Implement the RKNN backend behind the Phase 1 contract with explicit initialization and shutdown; do not rely on forked runtime state.
+- [ ] Register each verified RKNN model artifact and its NPU compatibility in the Phase 1b capability API so the existing selector can activate it without frontend special cases.
 - [ ] Add golden-image parity tests between Ultralytics and RKNN with documented numerical/detection tolerances.
 - [ ] Produce multi-architecture Compose images or architecture-specific inference targets without emulating NPU tests in CI.
 - [ ] Benchmark FPS, end-to-end latency, memory, NPU utilization, CPU decode, temperature, and sustained operation; choose nano/small and input size from evidence.
@@ -239,6 +290,7 @@ The first camera runs reliably on the Orange Pi using RKNN, offers safe timed PT
 
 - [ ] Orange Pi runs the stack through reboot/restart and sustains the agreed performance/thermal envelope.
 - [ ] RKNN and development backends satisfy the same contract and acceptable parity thresholds.
+- [ ] The Phase 1b selector reports and successfully applies the supported RKNN NPU model combinations on the Orange Pi while keeping incompatible development weights unavailable with a reason.
 - [ ] Browser PTZ performs short bounded moves without requiring `Stop`.
 - [ ] A qualifying detection emits at most one Discord alert per debounce window with an annotated snapshot, and dry-run mode emits none.
 - [ ] Automated tests pass; hardware-only checks have documented results and skip semantics.
@@ -252,7 +304,7 @@ The system becomes convenient for daily personal use before authentication is in
 ### Tasks
 
 - [ ] Implement SQLite persistence through SQLAlchemy 2 with Alembic migrations for the single-node deployment; keep media outside database rows and avoid SQLite database files on network filesystems.
-- [ ] Persist cameras, capability results, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
+- [ ] Persist cameras, capability results, the active inference backend/model/target selection, alert rules, events, and secret references—never plaintext secrets or authenticated URLs.
 - [ ] Keep the persistence/domain boundary compatible with a later PostgreSQL adapter and document the operational conditions that justify migration (multiple app instances, shared/remote database, or sustained write contention).
 - [ ] Add alert-history API/UI with pagination, filtering, sorting, snapshot/clip access, and deletion.
 - [ ] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
@@ -271,6 +323,40 @@ The system becomes convenient for daily personal use before authentication is in
 - [ ] Retention prevents unbounded storage and behaves safely when storage is unavailable/full.
 - [ ] Multiple simulated cameras cannot starve one another; real second-camera testing waits for hardware/configuration.
 - [ ] No export, API, log, or UI surface exposes stored secrets.
+
+## Phase 3b — Detection category selection (optional stretch goal, pre-auth)
+
+This stretch phase is optional and does not block Phase 4. Here, “category” means an object-detection class exposed by the selected model, not a separate image-classification model.
+
+### Outcome
+
+The operator can choose one or more detection categories beyond `person`—for example, model-provided vehicle or animal classes—for each camera and alert rule. The UI derives its choices from the active model's verified class catalog, persists them as shared configuration, and never offers a category the selected model cannot produce.
+
+### Scope exclusions
+
+No new model training, arbitrary label creation, semantic remapping guessed from display text, parcel support without a verified parcel-capable model, relational event logic, or multi-camera subject correlation. Phase 3b selects from classes already declared by an installed model artifact.
+
+### Tasks
+
+- [ ] Extend model/backend capabilities with a versioned class catalog containing stable semantic IDs, model-native class IDs, display labels, and optional descriptions; do not persist model-specific numeric indices as the cross-model identity.
+- [ ] Add persisted, versioned per-camera detection-category allowlists and per-alert-rule target categories, retaining `person` as the safe default for existing configurations.
+- [ ] Expose typed APIs that return categories for the active model/target combination and validate saved selections against that exact capability revision.
+- [ ] Apply the per-camera allowlist consistently to detection publication, overlays, metrics, snapshots/clips, and alert evaluation; an alert rule may reference only categories enabled for its camera.
+- [ ] Add accessible searchable multi-select controls with select-all/clear actions, category descriptions, active counts, validation, and a preview using deterministic detections.
+- [ ] Reconcile category selections during a Phase 1b model/backend switch by stable semantic ID. Require explicit resolution when the new model lacks a selected category; never silently broaden, drop, or substitute alert targets.
+- [ ] Show model changes that would invalidate camera or alert-rule categories before applying the switch, including affected cameras/rules and the available compatible choices.
+- [ ] Record the active category catalog revision and selected semantic IDs in events so historical results remain interpretable after model changes.
+- [ ] Unit/integration-test catalog validation, semantic-ID mapping, defaults, multi-select filtering, persistence/migration, invalidation conflicts, alert isolation, and models with different class catalogs.
+- [ ] Add Playwright coverage for selecting non-person categories, filtering overlays, configuring multi-category alert rules, persistence across restart, and resolving a model-switch incompatibility.
+- [ ] Update backup/export, README configuration guidance, and schema/API compatibility checks for class catalogs and selected categories.
+
+### Exit criteria
+
+- [ ] The UI lists only categories declared by the active model and can persist one or more non-`person` categories per camera and alert rule.
+- [ ] Detection overlays, event records, and alerts consistently honor the selected semantic categories while `person` remains the migration/default behavior.
+- [ ] Switching to a model with a different class catalog cannot silently remove, rename, or reinterpret an existing selection.
+- [ ] Multiple cameras may use different supported category selections without leaking detections or alert rules across cameras.
+- [ ] Backend, migration, frontend, Playwright, backup/export, and compatibility checks pass with deterministic models that expose different class catalogs.
 
 ## Phase 4 — Keycloak authentication and concurrent administration
 
@@ -306,6 +392,7 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 - [ ] Person-plus-parcel relational rules, dwell time, disappearance/theft logic, and line crossing.
 - [ ] Multi-camera subject correlation and advanced dashboard visualizations.
 - [ ] Additional notifiers and external storage backends.
+- [ ] Select a concrete TPU hardware family and runtime, then implement and contract-test its inference adapter and model-artifact pipeline; register it with the Phase 1b capability API only after hardware validation.
 - [ ] Image publishing, signed artifacts/SBOMs, Orange Pi deployment workflow, rollback, and release automation.
 
 ## Security hygiene completed during planning
@@ -323,6 +410,7 @@ All browser/API access is authenticated through Keycloak, authorization is enfor
 - [ ] Choose the repository copyright holder/notice for the AGPL-3.0 license.
 - [ ] Confirm dev machine OS, CPU/GPU/CUDA availability, RAM, and expected browsers.
 - [ ] Confirm Orange Pi OS image, NPU driver/runtime state, RAM, storage, and whether it is available during Phase 2.
+- [ ] Choose the intended TPU hardware/runtime (for example, an Edge TPU/TFLite-class target) before planning adapter implementation; `tpu` remains an unavailable capability category until then.
 - [x] Measure `PROFILE_001` and decide whether inference uses the substream or a downscaled main-stream restream.
 - [ ] Set numeric Phase 1 targets after the first baseline: acceptable view latency, detection age, inference FPS, and CPU/GPU usage.
 - [ ] Decide later whether snapshots/events may be retained by default; use memory-only behavior through Phase 2.
