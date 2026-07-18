@@ -192,6 +192,34 @@ class Repository:
                 camera.capabilities = capabilities
                 camera.version += 1
 
+    def add_camera(
+        self,
+        *,
+        expected_config_version: int,
+        camera_id: str,
+        name: str,
+        stream_secret_ref: str,
+    ) -> int:
+        with self.database.session() as session:
+            state = session.get(ConfigState, 1)
+            if state is None:
+                raise RuntimeError("configuration is not initialized")
+            if state.version != expected_config_version:
+                raise ConfigurationConflictError("configuration version conflict")
+            if session.get(CameraRecord, camera_id) is not None:
+                raise ValueError("camera already exists")
+            session.add(
+                CameraRecord(
+                    id=camera_id,
+                    name=name,
+                    stream_secret_ref=stream_secret_ref,
+                    capabilities={"runtime_state": "pending"},
+                    allowed_categories=["person"],
+                )
+            )
+            state.version += 1
+            return state.version
+
     def configuration_version(self) -> int:
         with self.database.session() as session:
             state = session.get(ConfigState, 1)

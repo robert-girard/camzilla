@@ -311,23 +311,24 @@ The system becomes convenient for daily personal use before authentication is in
 - [x] Add editable confidence, debounce, time schedules, and normalized polygon zones with validation and preview.
 - [x] Add pre-roll ring buffering and configurable 5–30 second alert clips with storage quotas and oldest-first retention.
 - [x] Add manual recording only after retention and disk-full behavior are tested.
-- [ ] Generalize orchestration/UI to multiple cameras while sharing or pooling inference workers based on measured memory/throughput.
+- [x] Generalize orchestration/UI to multiple cameras while sharing or pooling inference workers based on measured memory/throughput.
 - [x] Add optimistic config versioning before multiple authenticated editors exist, so Phase 4 does not retrofit it.
 - [ ] Add backup/export with secrets excluded by default and explicit restore validation.
 - [ ] Unit/integration-test migrations, rules, zones, schedules, retention, disk-full handling, multi-camera fairness, and backup/restore.
-- [~] Add Playwright coverage for history filters, rule editing conflicts/validation, zone drawing, clip playback, and multi-camera degraded states; history/rules/zones pass, while clip and multi-camera cases await their implementation slices.
+- [x] Add Playwright coverage for history filters, rule editing conflicts/validation, zone drawing, clip playback, and multi-camera degraded states.
 
 ### Phase 3 validation evidence
 
 - 2026-07-17: The initial migration, repository, runtime integration, history/config APIs, and selection rollback passed 75 backend tests plus 8 expected opt-in skips. Sixteen deterministic Playwright flows passed, including history filtering/deletion, optimistic conflict handling, schedule/rule editing, normalized zone drawing/preview, and client validation. Schema and API responses contain secret references or redacted capability state only, never secret values or authenticated URLs.
 - 2026-07-17: Media storage, quota retention, pre-roll/post-roll sessions, manual-recording gating, database-reference cleanup, and redacted disk failure behavior passed 83 backend tests plus 8 expected opt-in skips, including a real OpenCV MP4 encode on the development runtime. Seventeen Playwright flows passed with inline clip playback and manual start/stop controls. Tests used synthetic bytes/frames under temporary roots and retained no media.
+- 2026-07-17: Multi-camera persistence/API validation and the bounded round-robin scheduler passed 86 backend tests plus 8 expected opt-in skips. Flooding two simulated sources retained only one latest frame per camera and serviced the quieter source after the busy source's single turn. Eighteen Playwright flows passed, including distinct synthetic/degraded camera cards with only the operational camera exposing recording controls. Real second-camera testing remains hardware-dependent.
 - [ ] Extend GitHub Actions with migration checks and schema/API compatibility checks; deployment remains manual.
 
 ### Exit criteria
 
 - [ ] Personal daily-use configuration and history survive restart and migration.
 - [ ] Retention prevents unbounded storage and behaves safely when storage is unavailable/full.
-- [ ] Multiple simulated cameras cannot starve one another; real second-camera testing waits for hardware/configuration.
+- [x] Multiple simulated cameras cannot starve one another; real second-camera testing waits for hardware/configuration.
 - [ ] No export, API, log, or UI surface exposes stored secrets.
 
 ## Phase 3b — Detection category selection (optional stretch goal, pre-auth)

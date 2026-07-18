@@ -212,6 +212,13 @@ class CameraConfiguration(BaseModel):
     version: int
 
 
+class CameraCreate(BaseModel):
+    expected_config_version: int = Field(ge=1)
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=120)
+    stream_secret_ref: str = Field(pattern=r"^env:[A-Z][A-Z0-9_]+$")
+
+
 class AlertRuleConfiguration(BaseModel):
     id: str
     camera_id: str

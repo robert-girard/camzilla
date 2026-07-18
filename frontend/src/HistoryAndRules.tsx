@@ -137,10 +137,12 @@ export function HistoryAndRules() {
         {configuration?.cameras.map((camera) => (
           <article key={camera.id}>
             <h3>{camera.name}</h3>
-            <span>{camera.enabled ? 'enabled' : 'disabled'}</span>
-            <button type="button" onClick={() => void toggleRecording(camera.id)}>
-              {recordingId ? 'Stop recording' : 'Start recording'}
-            </button>
+            <span>{String(camera.capabilities.runtime_state ?? (camera.enabled ? 'enabled' : 'disabled'))}</span>
+            {['synthetic', 'configured', 'ready'].includes(String(camera.capabilities.runtime_state)) && (
+              <button type="button" onClick={() => void toggleRecording(camera.id)}>
+                {recordingId ? 'Stop recording' : 'Start recording'}
+              </button>
+            )}
           </article>
         ))}
       </div>

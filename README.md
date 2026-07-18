@@ -171,6 +171,13 @@ encoder failure is redacted and counted in health without terminating
 inference or notification processing. Never copy the media volume into CI
 artifacts; it may contain private camera imagery.
 
+Additional camera definitions may be persisted with environment secret
+references, and the UI renders each camera's independent runtime state. The
+current physical runtime still starts one configured stream. Multi-camera
+inference groundwork uses a shared, size-one-per-camera round-robin scheduler:
+a busy simulated camera can replace only its own stale frame and cannot starve
+a quieter camera. A real second-camera smoke waits for hardware/configuration.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 

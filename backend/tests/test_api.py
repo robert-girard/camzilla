@@ -125,6 +125,38 @@ def test_persisted_configuration_updates_optimistically_without_secret_values() 
     assert conflict.json() == {"detail": "configuration version conflict"}
 
 
+def test_additional_camera_persists_only_a_secret_reference() -> None:
+    with TestClient(app) as client:
+        version = client.get("/api/v1/config").json()["version"]
+        payload = {
+            "expected_config_version": version,
+            "id": "side-door",
+            "name": "Side door",
+            "stream_secret_ref": "env:CAMZILLA_SIDE_DOOR_RTSP_URL",
+        }
+        created = client.post("/api/v1/cameras", json=payload)
+        duplicate = client.post(
+            "/api/v1/cameras", json={**payload, "expected_config_version": version + 1}
+        )
+        unsafe = client.post(
+            "/api/v1/cameras",
+            json={
+                **payload,
+                "expected_config_version": version + 1,
+                "id": "unsafe",
+                "stream_secret_ref": "literal-secret-value",
+            },
+        )
+    assert created.status_code == 201
+    assert {item["id"] for item in created.json()["cameras"]} == {"front-door", "side-door"}
+    side_door = next(item for item in created.json()["cameras"] if item["id"] == "side-door")
+    assert side_door["capabilities"]["runtime_state"] == "pending"
+    assert "CAMZILLA_SIDE_DOOR_RTSP_URL" not in created.text
+    assert "rtsp://" not in created.text
+    assert duplicate.status_code == 409
+    assert unsafe.status_code == 422
+
+
 def test_rule_update_rejects_invalid_zone_schedule_and_disabled_category() -> None:
     with TestClient(app) as client:
         version = client.get("/api/v1/config").json()["version"]

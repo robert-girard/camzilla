@@ -83,6 +83,7 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
 - Service/process shutdown must close streams and runtimes explicitly. RKNN initialization/shutdown behavior is validated on the Orange Pi rather than inferred from x86 behavior.
 - Runtime model/target changes use the same explicit lifecycle. A switch lock prevents concurrent workers from racing; video stays independent, while detection readiness reports the transition and resumes only after the new identity is confirmed.
 - Alert evaluation is isolated from inference and notification I/O. Qualifying results enter a size-one bounded delivery queue after debounce; the queued frame is copied, annotated in memory, and released after delivery. Notifier timeout/retry/rate-limit failures update redacted status without terminating inference. Pre-auth Discord delivery requires both valid external secret configuration and an explicit confirmation flag; otherwise the rule runs through the dry-run adapter.
+- Phase 3 multi-camera groundwork keeps a size-one latest-frame slot per camera and selects ready cameras round-robin through the shared inference worker. A high-rate source may replace only its own pending frame, so it cannot create an unbounded backlog or starve a quieter source. The default remains one worker until measured memory/throughput justifies a configurable pool.
 
 ## 6. Detection Model Notes
 

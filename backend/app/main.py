@@ -18,6 +18,7 @@ from .contracts import (
     AlertRule,
     AlertRuleUpdate,
     AlertRuntimeStatus,
+    CameraCreate,
     EventPage,
     GlobalConfiguration,
     InferenceCapabilitiesResponse,
@@ -257,6 +258,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.camera_name,
         {
             "ptz": ptz_service.capability.model_dump(mode="json"),
+            "runtime_state": "configured" if settings.camera_rtsp_url else "synthetic",
             "inference": [
                 {
                     "id": spec.capability.id,
@@ -361,6 +363,24 @@ async def alert_status() -> AlertRuntimeStatus:
 @app.get("/api/v1/config", response_model=GlobalConfiguration)
 async def configuration() -> GlobalConfiguration:
     repository: Repository = app.state.repository
+    return await asyncio.to_thread(repository.configuration)
+
+
+@app.post("/api/v1/cameras", response_model=GlobalConfiguration, status_code=201)
+async def add_camera(request: CameraCreate) -> GlobalConfiguration:
+    repository: Repository = app.state.repository
+    try:
+        await asyncio.to_thread(
+            repository.add_camera,
+            expected_config_version=request.expected_config_version,
+            camera_id=request.id,
+            name=request.name,
+            stream_secret_ref=request.stream_secret_ref,
+        )
+    except ConfigurationConflictError as error:
+        raise HTTPException(status_code=409, detail="configuration version conflict") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="camera already exists") from error
     return await asyncio.to_thread(repository.configuration)
 
 

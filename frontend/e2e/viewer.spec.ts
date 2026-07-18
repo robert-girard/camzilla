@@ -77,7 +77,10 @@ async function installMocks(page: Page, options: MockOptions = {}) {
     const configuration = {
       version: 3, active_capability_id: 'fake:yolov8n:cpu',
       cameras: [{
-        id: 'front-door', name: 'front-door', enabled: true, capabilities: {},
+        id: 'front-door', name: 'front-door', enabled: true, capabilities: { runtime_state: 'synthetic' },
+        allowed_categories: ['person'], catalog_revision: 'person-v1', version: 1,
+      }, {
+        id: 'side-door', name: 'side-door', enabled: true, capabilities: { runtime_state: 'degraded' },
         allowed_categories: ['person'], catalog_revision: 'person-v1', version: 1,
       }],
       alert_rules: [{
@@ -407,6 +410,15 @@ test('starts and stops one manual recording from the camera card', async ({ page
   await expect(history.getByText('Manual recording started')).toBeVisible()
   await history.getByRole('button', { name: 'Stop recording' }).click()
   await expect(history.getByText('Recording is processing')).toBeVisible()
+})
+
+test('shows multiple camera runtime states without duplicating active controls', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const cameras = page.getByLabel('Configured cameras')
+  await expect(cameras).toContainText('front-doorsynthetic')
+  await expect(cameras).toContainText('side-doordegraded')
+  await expect(cameras.getByRole('button', { name: 'Start recording' })).toHaveCount(1)
 })
 
 test('edits rule values and draws a normalized zone', async ({ page }) => {
