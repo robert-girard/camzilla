@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1 in progress (x86 development scope; Orange Pi deployment deferred)
+Status: Phase 1 complete (x86 development scope; Orange Pi deployment deferred to Phase 2)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -180,11 +180,12 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [x] `person` boxes remain correctly placed during resize/fullscreen and disappear when older than the configured TTL.
 - [x] The pipeline remains responsive under slower-than-source inference because old frames are dropped.
 - [x] CPU inference works on x86; CUDA selection/fallback is reported accurately when applicable.
-- [ ] Automated backend, frontend, integration, Playwright, build, and security checks pass in GitHub Actions.
+- [x] Automated backend, frontend, integration, Playwright, build, and security checks pass in GitHub Actions.
 - [x] Manual smoke results record browser, timestamp-based pipeline latency, view FPS, inference FPS, CPU/GPU utilization, and known limitations without retaining private media.
 
 ### Phase 1 validation evidence
 
+- 2026-07-17: GitHub Actions [CI run #2](https://github.com/robert-girard/camzilla/actions/runs/29624848742) passed on commit `1777fa8`: backend format/lint/type/unit/integration checks, frontend lint/type/unit/build/Playwright checks, and the security/Compose configuration, image-build, and clean no-camera startup smoke job all completed successfully.
 - 2026-07-17: A redacted physical-camera smoke in Headless Chromium 150 connected WebRTC at 2304x1296 and measured 13.2 displayed FPS over 3 seconds. Browser network requests exposed only `/api/v1/stream` and `/api/v1/webrtc`; metadata remained connected through fullscreen. The HLS diagnostic proxy returned HTTP 200, and the internal bridge reported one producer with three active consumers.
 - 2026-07-17: During the physical CPU smoke, YOLOv8n reported about 4.7 inference FPS, 20-26 ms recent inference, zero failures, a 26 ms sampler-capture-to-result interval, and a result observed by the browser at 148 ms old. The API container used about 130% of one CPU core and 545 MiB, go2rtc about 0.8%/17 MiB, and the development frontend about 0.2%/254 MiB at the sampled instant. CUDA was unavailable and the explicit CPU fallback was correct. No frames, recordings, URLs, credentials, or browser artifacts were retained. True scene-to-display latency was not measurable without placing a synchronized time source in the private scene; timestamp metrics begin after decode.
 - 2026-07-17: A redacted ONVIF discovery run measured `PROFILE_000` as H.264 2304x1296 at 15 FPS/1536 kbps and `PROFILE_001` as H.264 640x360 at 15 FPS/512 kbps; both returned an RTSP URI. Phase 1 uses the main profile for the single go2rtc upstream and lets inference resize from the shared local restream.
