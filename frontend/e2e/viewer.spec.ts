@@ -2,20 +2,37 @@ import { expect, test, type Page } from '@playwright/test'
 
 type MockOptions = {
   videoFailure?: boolean
+  selectionFailure?: boolean
+  switchDelayMs?: number
 }
 
 function detectionMessage() {
   return {
     version: 'v1', sequence: 7, capture_timestamp: new Date().toISOString(),
     result_timestamp: new Date().toISOString(), source_width: 1280, source_height: 720,
-    backend_id: 'fake', model_id: 'yolov8n', inference_ms: 4.5, inference_fps: 5,
+    backend_id: 'fake', model_id: 'yolov8n', target: 'cpu', device: 'synthetic', inference_ms: 4.5, inference_fps: 5,
     detections: [{ class_name: 'person', confidence: 0.91, box: { x: 0.25, y: 0.2, width: 0.5, height: 0.5 } }],
   }
 }
 
+function inferenceState() {
+  const capabilities = [
+    { id: 'fake:yolov8n:cpu', backend_id: 'fake', model_id: 'yolov8n', target: 'cpu', device: 'synthetic', compatible: true, available: true, active: true },
+    { id: 'ultralytics:yolo11s:cpu', backend_id: 'ultralytics', model_id: 'yolo11s', target: 'cpu', device: 'cpu', compatible: true, available: true, active: false },
+    { id: 'ultralytics:yolo11s:gpu', backend_id: 'ultralytics', model_id: 'yolo11s', target: 'gpu', device: 'cuda', compatible: true, available: false, unavailable_reason: 'CUDA device is not available', active: false },
+    { id: 'rknn:unconfigured:npu', backend_id: 'rknn', model_id: 'unconfigured', target: 'npu', device: 'npu', compatible: false, available: false, unavailable_reason: 'RKNN NPU support is delivered in Phase 4b', active: false },
+    { id: 'tpu:unconfigured:tpu', backend_id: 'tpu', model_id: 'unconfigured', target: 'tpu', device: 'tpu', compatible: false, available: false, unavailable_reason: 'TPU hardware and runtime are not configured', active: false },
+  ]
+  return {
+    active: { capability_id: 'fake:yolov8n:cpu', backend_id: 'fake', model_id: 'yolov8n', target: 'cpu', device: 'synthetic' },
+    transition_state: 'ready', runtime_only: true, capabilities,
+  }
+}
+
 async function installMocks(page: Page, options: MockOptions = {}) {
-  await page.addInitScript(({ message, settings }) => {
+  await page.addInitScript(({ message, settings, inferenceState }) => {
     const sockets: MockSocket[] = []
+    const inference = inferenceState
     class MockSocket {
       onopen: ((event: Event) => void) | null = null
       onmessage: ((event: MessageEvent) => void) | null = null
@@ -49,15 +66,42 @@ async function installMocks(page: Page, options: MockOptions = {}) {
     Object.defineProperty(window, '__camzillaCloseMetadata', {
       value: () => sockets.at(-1)?.onclose?.(new CloseEvent('close')),
     })
-    window.fetch = async (input) => {
+    window.fetch = async (input, init) => {
       const url = String(input)
       if (url.includes('/api/v1/stream')) {
         return new Response(JSON.stringify({ camera_name: 'front-door', webrtc_path: '/api/v1/webrtc', diagnostic_fallback: 'hls' }))
       }
+      if (url.includes('/api/v1/inference/selection')) {
+        if (settings.selectionFailure) {
+          return new Response(JSON.stringify({ detail: 'switch failed; previous inference remains active' }), {
+            status: 503, headers: { 'content-type': 'application/json' },
+          })
+        }
+        if (settings.switchDelayMs) await new Promise((resolve) => setTimeout(resolve, settings.switchDelayMs))
+        const body = JSON.parse(String(init?.body)) as { capability_id: string }
+        const selected = inference.capabilities.find((item) => item.id === body.capability_id)
+        if (!selected?.available) return new Response(JSON.stringify({ detail: 'inference capability is unavailable' }), { status: 409 })
+        inference.active = {
+          capability_id: selected.id, backend_id: selected.backend_id, model_id: selected.model_id,
+          target: selected.target, device: selected.device,
+        }
+        inference.capabilities = inference.capabilities.map((item) => ({ ...item, active: item.id === selected.id }))
+        sockets.at(-1)?.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ type: 'reset' }) }))
+        setTimeout(() => sockets.at(-1)?.onmessage?.(new MessageEvent('message', {
+          data: JSON.stringify({
+            ...message, backend_id: selected.backend_id, model_id: selected.model_id,
+            target: selected.target, device: selected.device, result_timestamp: new Date().toISOString(),
+          }),
+        })), 25)
+        return new Response(JSON.stringify(inference), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/inference')) {
+        return new Response(JSON.stringify(inference), { headers: { 'content-type': 'application/json' } })
+      }
       if (settings.videoFailure) return new Response('unavailable', { status: 503 })
       return new Response('v=0', { headers: { 'content-type': 'application/sdp' } })
     }
-  }, { message: detectionMessage(), settings: options })
+  }, { message: detectionMessage(), settings: options, inferenceState: inferenceState() })
 }
 
 test('shows accessible connected diagnostics and a source-coordinate overlay', async ({ page }) => {
@@ -67,8 +111,44 @@ test('shows accessible connected diagnostics and a source-coordinate overlay', a
   await expect(page.getByText('person 91%')).toBeVisible()
   await expect(page.getByLabel('Detection overlay')).toHaveAttribute('viewBox', '0 0 1280 720')
   await expect(page.getByLabel('Diagnostics')).toContainText('Backend/model: fake/yolov8n')
+  await expect(page.getByLabel('Diagnostics')).toContainText('Target/device: cpu/synthetic')
   await expect(page.getByLabel('Diagnostics')).toContainText('Video: connected')
   await expect(page.getByRole('button', { name: 'Fullscreen' })).toBeVisible()
+})
+
+test('switches to an available CPU model only after explicit apply', async ({ page }) => {
+  await installMocks(page, { switchDelayMs: 100 })
+  await page.goto('/')
+  await expect(page.getByText('person 91%')).toBeVisible()
+  await page.getByRole('radio', { name: 'yolo11s', exact: true }).check()
+  await page.getByRole('button', { name: 'Apply inference selection' }).click()
+  await expect(page.getByRole('button', { name: 'Switching inference…' })).toBeDisabled()
+  await expect(page.getByText('person 91%')).toBeHidden()
+  await expect(page.getByText('Active: yolo11s on CPU')).toBeVisible()
+  await expect(page.getByLabel('Diagnostics')).toContainText('Backend/model: ultralytics/yolo11s')
+  await expect(page.getByText('person 91%')).toBeVisible()
+})
+
+test('explains unavailable GPU NPU and TPU targets', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'GPU' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'NPU' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'TPU' })).toBeVisible()
+  await expect(page.getByText('CUDA device is not available')).toBeVisible()
+  await expect(page.getByText('RKNN NPU support is delivered in Phase 4b')).toBeVisible()
+  await expect(page.getByText('TPU hardware and runtime are not configured')).toBeVisible()
+  await expect(page.getByRole('radio', { name: /yolo11s CUDA device/ })).toBeDisabled()
+})
+
+test('keeps the confirmed selection and reports a failed switch', async ({ page }) => {
+  await installMocks(page, { selectionFailure: true })
+  await page.goto('/')
+  await page.getByRole('radio', { name: 'yolo11s', exact: true }).check()
+  await page.getByRole('button', { name: 'Apply inference selection' }).click()
+  await expect(page.getByRole('alert')).toHaveText('switch failed; previous inference remains active')
+  await expect(page.getByText('Active: yolov8n on CPU')).toBeVisible()
+  await expect(page.getByLabel('Diagnostics')).toContainText('Backend/model: fake/yolov8n')
 })
 
 test('keeps the overlay with the video during resize and fullscreen', async ({ page }) => {

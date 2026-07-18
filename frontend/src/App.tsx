@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { exchangeWebRtcOffer, getStreamDescriptor } from './api'
+import { InferenceSelector } from './InferenceSelector'
 import { isStale, sourceRect } from './overlay'
-import type { DetectionMessage, StreamDescriptor } from './types'
+import type { DetectionMessage, InferenceSelection, StreamDescriptor } from './types'
 
 type ConnectionState = 'loading' | 'connected' | 'degraded' | 'disconnected'
 type VideoState = 'loading' | 'connected' | 'degraded'
@@ -23,6 +24,7 @@ export function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const viewerRef = useRef<HTMLElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  const [confirmedInference, setConfirmedInference] = useState<InferenceSelection>()
 
   useEffect(() => {
     let metadataRetry: number | undefined
@@ -89,8 +91,9 @@ export function App() {
       socket = new WebSocket(socketUrl())
       socket.onopen = () => setConnection('connected')
       socket.onmessage = (event) => {
-        const message = JSON.parse(event.data) as DetectionMessage | { type: 'heartbeat' }
+        const message = JSON.parse(event.data) as DetectionMessage | { type: 'heartbeat' | 'reset' }
         if ('version' in message) setResult(message)
+        else if (message.type === 'reset') setResult(undefined)
       }
       socket.onclose = () => {
         if (!stopped) {
@@ -164,11 +167,20 @@ export function App() {
       <aside aria-label="Diagnostics" className="diagnostics">
         <span>Video: {videoState}</span>
         <span>Metadata: {stale ? 'stale' : connection}</span>
-        <span>Backend/model: {result ? `${result.backend_id}/${result.model_id}` : '—'}</span>
+        <span>Backend/model: {result
+          ? `${result.backend_id}/${result.model_id}`
+          : confirmedInference ? `${confirmedInference.backend_id}/${confirmedInference.model_id}` : '—'}</span>
+        <span>Target/device: {result
+          ? `${result.target}/${result.device}`
+          : confirmedInference ? `${confirmedInference.target}/${confirmedInference.device}` : '—'}</span>
         <span>Inference: {result ? `${result.inference_ms.toFixed(1)} ms` : '—'}</span>
         <span>Inference FPS: {result ? result.inference_fps.toFixed(1) : '—'}</span>
         <span>Result age: {age === undefined ? '—' : `${age.toFixed(1)} s`}</span>
       </aside>
+      <InferenceSelector
+        onResetDetections={() => setResult(undefined)}
+        onSelectionChange={setConfirmedInference}
+      />
     </main>
   )
 }

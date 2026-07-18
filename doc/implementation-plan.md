@@ -224,16 +224,16 @@ No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence
 
 #### Frontend
 
-- [ ] Add accessible model and inference-target controls to the single-camera page, showing CPU, GPU, NPU, and TPU categories, the active combination, loading/switching state, and clear reasons for unavailable or incompatible choices.
-- [ ] Require an explicit apply action, preserve the displayed active selection until the server confirms the swap, and show recoverable failure feedback when warm-up or switching fails.
-- [ ] Keep the overlay and diagnostics coherent during switching: expire old detections, reconnect metadata when required, and display the confirmed backend/model/target identity returned by the server.
-- [ ] Explain in the UI that the selection is global and runtime-only through Phase 2 and that unavailable hardware requires its corresponding backend/runtime rather than a browser setting.
+- [x] Add accessible model and inference-target controls to the single-camera page, showing CPU, GPU, NPU, and TPU categories, the active combination, loading/switching state, and clear reasons for unavailable or incompatible choices.
+- [x] Require an explicit apply action, preserve the displayed active selection until the server confirms the swap, and show recoverable failure feedback when warm-up or switching fails.
+- [x] Keep the overlay and diagnostics coherent during switching: expire old detections, reconnect metadata when required, and display the confirmed backend/model/target identity returned by the server.
+- [x] Explain in the UI that the selection is global and runtime-only through Phase 2 and that unavailable hardware requires its corresponding backend/runtime rather than a browser setting.
 
 #### Tests, documentation, and integration gates
 
 - [ ] Unit-test capability/compatibility validation, stable IDs, unavailable reasons, concurrent request serialization, transition state, queue/result reset, successful cleanup, failed warm-up rollback, and redaction.
 - [ ] Integration-test CPU model switching through the running pipeline and deterministic fake capability fixtures for CPU, GPU, NPU, and TPU; keep CUDA/RKNN/TPU hardware tests opt-in with clear skip semantics.
-- [ ] Add Playwright flows for a successful model/CPU switch, capability-gated GPU/NPU/TPU choices, switching state, failed-switch rollback, diagnostics identity, stale-overlay expiry, and metadata recovery.
+- [x] Add Playwright flows for a successful model/CPU switch, capability-gated GPU/NPU/TPU choices, switching state, failed-switch rollback, diagnostics identity, stale-overlay expiry, and metadata recovery.
 - [ ] Update the root README with selection behavior, supported combinations, runtime-only semantics, restart defaults, expected interruption, unavailable-target troubleshooting, and hardware-dependent validation commands.
 - [ ] Extend CI to run the selection contract, integration, frontend, and deterministic Playwright tests without requiring model binaries or accelerator hardware.
 - [ ] When Phase 4b adds RKNN, register its verified model artifacts in this capability contract and make NPU choices selectable without changing the Phase 1b API or UI contract.
