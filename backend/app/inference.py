@@ -76,7 +76,7 @@ class FakeInferenceBackend:
 
 
 class UltralyticsBackend:
-    """YOLOv8 adapter loaded only in deployments that opt into Ultralytics."""
+    """Supported Ultralytics YOLO adapter loaded only in deployments that opt in."""
 
     backend_id = "ultralytics"
 

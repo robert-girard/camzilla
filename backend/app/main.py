@@ -14,7 +14,9 @@ from .transport import DetectionHub
 
 def build_backend(settings: Settings) -> InferenceBackend:
     if settings.inference_backend == "ultralytics":
-        return UltralyticsBackend(settings.model_id, settings.model_path, settings.inference_device)
+        return UltralyticsBackend(
+            settings.model_id, settings.resolved_model_path, settings.inference_device
+        )
     return FakeInferenceBackend(settings.model_id)
 
 

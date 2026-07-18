@@ -3,6 +3,8 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+SUPPORTED_MODEL_IDS = frozenset({"yolov8n", "yolov8s", "yolov8m", "yolo11n", "yolo11s", "yolo11m"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CAMZILLA_", extra="ignore")
@@ -13,7 +15,7 @@ class Settings(BaseSettings):
     inference_backend: str = "fake"
     inference_device: str = "auto"
     model_id: str = "yolov8n"
-    model_path: str = "/models/yolov8n.pt"
+    model_path: str | None = None
     inference_fps: float = Field(default=5.0, gt=0, le=60)
     confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     allowed_classes: str = "person"
@@ -32,6 +34,18 @@ class Settings(BaseSettings):
         if value not in {"auto", "cpu", "cuda"}:
             raise ValueError("must be auto, cpu, or cuda")
         return value
+
+    @field_validator("model_id")
+    @classmethod
+    def valid_model_id(cls, value: str) -> str:
+        if value not in SUPPORTED_MODEL_IDS:
+            supported = ", ".join(sorted(SUPPORTED_MODEL_IDS))
+            raise ValueError(f"must be one of: {supported}")
+        return value
+
+    @property
+    def resolved_model_path(self) -> str:
+        return self.model_path or f"/models/{self.model_id}.pt"
 
     @property
     def class_filter(self) -> frozenset[str]:

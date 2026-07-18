@@ -22,7 +22,7 @@ This document records Camzilla's current technical direction: deployment targets
 | Inference (dev / CPU / GPU) | **Ultralytics** (CPU or CUDA) | |
 | Video bridging (browser) | **WebRTC through `go2rtc`** | HLS/MJPEG is a diagnostic fallback; see §4 |
 | Detection metadata | **Versioned backend WebSocket** | Timestamped normalized boxes rendered over video in the browser |
-| Detection model | **YOLOv8n initially** | Benchmark other sizes/generations before adoption; see §6 |
+| Detection model | **YOLOv8/YOLO11 n/s/m in development; YOLOv8n default** | Orange Pi production selection remains measurement-driven; see §6 |
 | Relational persistence | **SQLite + SQLAlchemy 2 + Alembic** | Phase 3; local single-node metadata/config/events, with a PostgreSQL migration path |
 | Media persistence | **Filesystem with database references** | Snapshots/clips stay out of database blobs; retention owns lifecycle |
 | Local orchestration | **Docker Compose development override/watch** | Vite HMR and FastAPI reload without ordinary source rebuilds |
@@ -78,10 +78,10 @@ Detection boxes are not burned into the video. FastAPI sends versioned results o
 
 ## 6. Detection Model Notes
 
-- **Initial model:** Ultralytics YOLOv8n for the Phase 1 CPU/CUDA vertical slice and Phase 2 RKNN conversion/parity work.
-  - YOLOv9 has weaker/less mature RKNN and embedded tooling support currently — more manual conversion work — not selected for this reason, despite some architectural advantages.
-  - YOLOv8 currently has the preferred RKNN tooling/maturity for this project.
-  - YOLOv11 or other sizes remain benchmark candidates, not assumed upgrades.
+- **Development models:** Ultralytics YOLOv8 and YOLO11 detection weights in nano, small, and medium sizes are supported for the Phase 1 CPU/CUDA vertical slice; YOLOv8n remains the default.
+  - Each managed weight has a pinned upstream URL and SHA-256 provenance record and is selected by model ID without changing application contracts.
+  - Making all six weights available for development supports comparison but is not an Orange Pi deployment decision.
+  - YOLOv8 currently has the more established RKNN tooling path for this project; Phase 2 benchmarks candidate generation, size, and input resolution before selecting the NPU artifact.
 - **Selection rule:** choose model size and input resolution from measured accuracy, FPS, latency, memory, and thermal behavior on both development and target hardware. The initial 5–10 inference FPS goal does not require the viewer to run at the same rate.
 - **Package/parcel detection:** COCO pretraining does not include a generic "package" class. Plan is to fine-tune a nano/small YOLO model using a labeled dataset (Ultralytics' package segmentation dataset, and/or a Roboflow community dataset) — no adequate pretrained package-specific model found on Hugging Face at time of research. Training workflow is a separate task to scope later.
 - **Detection type:** standard object detection (bounding boxes + class + confidence), not segmentation — sufficient for zone/overlap-based alert logic (e.g. person+parcel proximity) at lower compute cost than pixel-mask segmentation.

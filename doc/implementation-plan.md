@@ -1,7 +1,7 @@
 # Camzilla Implementation Plan
 
 Status: Phase 1 in progress
-Last updated: 2026-07-12
+Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
 ## Document Role and References
@@ -25,7 +25,7 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 - Browser video uses `go2rtc` WebRTC. Detection metadata travels separately over a backend WebSocket and is rendered on a canvas overlay. HLS/MJPEG is diagnostic fallback only.
 - Docker Compose is used for development and deployment. Development uses Vite HMR, FastAPI reload, source sync/bind mounts, and dependency-triggered rebuilds.
 - GitHub Actions provides CI for tests, checks, and builds. Deployment automation is deferred.
-- The MVP uses Ultralytics and YOLOv8 under AGPL-3.0. Add the project license and third-party notices before introducing the dependency. Keep inference pluggable to preserve a future replacement/enterprise-license path.
+- The development MVP uses Ultralytics and supports the COCO detection weights for YOLOv8 and YOLO11 in nano, small, and medium sizes under AGPL-3.0; YOLOv8n remains the low-cost default. Keep inference pluggable to preserve a future replacement/enterprise-license path. Orange Pi/RKNN model selection remains a Phase 2 benchmark decision.
 - No authentication is present until Phase 4. Before then, services bind to loopback by default; LAN access is explicit and documented as trusted-network-only.
 - Phase 1 creates a root `README.md` as the developer/operator entry point, covering development live reload, production-like x86 usage, configuration, security, tests, health, troubleshooting, and the Phase 2 boundary for Orange Pi/RKNN support.
 - Persistent relational state uses SQLite on local storage with SQLAlchemy 2 and Alembic. Media remains in filesystem storage, credentials remain in environment/external secrets, and PostgreSQL is a later migration path for multi-instance or write-heavy deployments rather than an initial dependency.
@@ -130,6 +130,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 - [x] Define `InferenceBackend` lifecycle and detection contracts: load/warm-up, detect, health, close, backend/model metadata, normalized box, class, confidence, source dimensions, timestamps, and timing metrics.
 - [x] Implement a fake deterministic backend first to validate orchestration and UI independent of ML/hardware.
 - [x] Implement Ultralytics YOLOv8n CPU inference; select CUDA automatically only when configured and available, with an explicit reported fallback.
+- [x] Allow verified YOLOv8 and YOLO11 detection weights in nano, small, and medium sizes to be selected for development CPU/CUDA inference; keep YOLOv8n as the default.
 - [x] Limit MVP classes to `person` by default while keeping filters configurable.
 - [x] Implement preprocessing with preserved aspect ratio and tested reverse coordinate mapping.
 - [x] Add configurable sampling and a size-one/bounded latest-frame queue; measure dropped, processed, and failed frames.
@@ -182,6 +183,7 @@ No PTZ UI, Discord notification, event history, recording, persistent configurat
 
 ### Phase 1 validation evidence
 
+- 2026-07-17: All six managed development weights (`yolov8n`, `yolov8s`, `yolov8m`, `yolo11n`, `yolo11s`, and `yolo11m`) matched the SHA-256 values recorded from the official Ultralytics v8.4.0 assets release and passed the shared CPU load, warm-up, synthetic-frame detect, identity, and health contract. Weight binaries remained ignored and were not committed.
 - 2026-07-12: The production-style amd64 API image loaded the checksum-verified YOLOv8n weight on CPU and detected `person` (top confidence 0.87) from a public, temporary fixture; neither weight nor fixture was committed. In the no-camera synthetic pipeline it reported 5.0 inference FPS, 31.0 ms most-recent inference, zero failures, and zero dropped frames. The backend records CPU fallback when CUDA is unavailable.
 - 2026-07-12: The no-camera Compose stack ran with deterministic fake frames. Chromium verified connected detection metadata, an SVG `person` overlay, diagnostics, and the degraded WebRTC state. Real-camera latency/FPS and browser/WebRTC success remain explicit smoke work.
 

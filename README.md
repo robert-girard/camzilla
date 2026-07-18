@@ -21,10 +21,22 @@ only on a trusted LAN. Phase 1 has no authentication, so LAN exposure permits
 any network peer to use the viewer. The `go2rtc` administrative API is internal
 only, and camera URLs are not returned by the API.
 
-For real YOLO inference, place the verified `yolov8n.pt` artifact in the ignored
-`models/` directory, set `CAMZILLA_INFERENCE_BACKEND=ultralytics`, and use
-`uv sync --extra ultralytics` for a host-side backend run. The Compose image
-includes that optional runtime. Inference reads only the local
+For real YOLO inference, choose `yolov8n`, `yolov8s`, `yolov8m`, `yolo11n`,
+`yolo11s`, or `yolo11m`. Nano is fastest and medium is the most resource-heavy;
+`yolov8n` remains the default. Download a recorded upstream artifact and verify
+its checksum in one step, then select it in `.env`:
+
+```sh
+python3 scripts/download-model.py yolo11s
+# .env
+CAMZILLA_INFERENCE_BACKEND=ultralytics
+CAMZILLA_MODEL_ID=yolo11s
+```
+
+The managed path is `/models/<model-id>.pt`; `CAMZILLA_MODEL_PATH` is available
+only when an explicit verified path is needed. Use `uv sync --extra ultralytics`
+for a host-side backend run. The Compose image includes that optional runtime.
+Inference reads only the local
 `CAMZILLA_INFERENCE_RESTREAM_URL` from `go2rtc`; it does not open another
 physical-camera connection.
 
@@ -33,7 +45,7 @@ listed in `models/manifest.yaml` and use a redistributable fixture image:
 
 ```sh
 cd backend
-CAMZILLA_ULTRALYTICS_MODEL_PATH=../models/yolov8n.pt \
+CAMZILLA_ULTRALYTICS_MODEL_PATH=../models/yolo11s.pt \
 CAMZILLA_ULTRALYTICS_FIXTURE_PATH=/path/to/public-fixture.jpg \
 uv run --extra ultralytics pytest tests/test_ultralytics_contract.py
 ```

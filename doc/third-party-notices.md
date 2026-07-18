@@ -1,10 +1,11 @@
 # Third-party and model provenance
 
 Camzilla is distributed under AGPL-3.0-or-later. Phase 1 is designed to use the
-[Ultralytics](https://github.com/ultralytics/ultralytics) package and YOLOv8n
-weights under the Ultralytics AGPL-3.0 license path. Before enabling the
-Ultralytics backend, record the exact package version and SHA-256 of the
-downloaded weights in `models/manifest.yaml`; do not commit the weights.
+[Ultralytics](https://github.com/ultralytics/ultralytics) package and the
+recorded YOLOv8/YOLO11 detection weights under the Ultralytics AGPL-3.0 license
+path. Phase 1 supports nano, small, and medium weights for each generation.
+Before enabling the Ultralytics backend, verify the exact artifact SHA-256
+against `models/manifest.yaml`; do not commit the weights.
 
 The deterministic fake backend is used by default in development and CI and has
 no model or dataset dependency. Test fixtures must be synthetic or explicitly

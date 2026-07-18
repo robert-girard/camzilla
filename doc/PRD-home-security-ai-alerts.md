@@ -123,7 +123,7 @@ These are foundational design decisions that should be in place from the start, 
 
 ## 8. Model / Detection Notes (background, informs design doc)
 
-- YOLOv8n through Ultralytics is the initial development model because it provides the shortest path to CPU/CUDA inference and mature export tooling. RKNN parity is added on the Orange Pi in implementation Phase 2; other YOLO generations or weight sizes require measurement before adoption.
+- Ultralytics YOLOv8 and YOLO11 COCO detection weights in nano, small, and medium sizes are selectable for development CPU/CUDA inference. YOLOv8n remains the default because it has the lowest development compute cost. RKNN parity and the supported production model are selected from Orange Pi measurements in implementation Phase 2; development availability does not imply NPU suitability.
 - Camzilla will use Ultralytics under AGPL-3.0 for the MVP. Code, weights, datasets, and generated model artifacts require recorded license provenance and checksums.
 - COCO-pretrained models cover "person" well but have no generic "package/box" class — a fine-tuned model (e.g. via Ultralytics' package segmentation dataset or Roboflow community datasets) will be needed for parcel detection.
 - Target performance envelope: near-real-time (5–10 fps acceptable) across multiple camera streams on the Orange Pi 5's NPU (~6 TOPS).
@@ -133,7 +133,7 @@ These are foundational design decisions that should be in place from the start, 
 ### First Implementation Slice (Implementation Phase 1)
 
 - One physical camera works in an in-browser WebRTC viewer on the x86 development machine.
-- YOLOv8n detects `person` through a pluggable inference backend and sends timestamped, backend-neutral detection metadata.
+- A selectable YOLOv8/YOLO11 nano, small, or medium weight detects `person` through a pluggable inference backend and sends timestamped, backend-neutral detection metadata; YOLOv8n is the default.
 - Class/confidence bounding boxes render correctly over the live video, including resize/fullscreen handling and stale-result expiry.
 - CPU inference works; CUDA is selected only when configured and available, with an explicit fallback.
 - Backend, frontend, integration, Playwright, build, and security checks run in GitHub Actions without physical-camera access or secrets.
