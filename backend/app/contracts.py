@@ -160,5 +160,8 @@ class AlertRuntimeStatus(BaseModel):
     failed_events: int
     dropped_events: int
     suppressed_events: int
+    stream_state: Literal["connecting", "ready", "degraded"]
+    stream_down_events: int
+    stream_recovery_events: int
     last_event_at: datetime | None = None
     last_error: str | None = None

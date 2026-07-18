@@ -41,6 +41,42 @@ export type PtzMoveResponse = {
   duration_seconds: number
 }
 
+export type AlertRule = {
+  id: string
+  camera_name: string
+  target_classes: string[]
+  confidence_threshold: number
+  debounce_seconds: number
+  enabled: boolean
+}
+
+export type AlertRuntimeStatus = {
+  rule: AlertRule
+  requested_notifier: 'dry-run' | 'discord'
+  effective_notifier: 'dry-run' | 'discord'
+  external_delivery_configured: boolean
+  configuration_reason?: string
+  queued_events: number
+  delivered_events: number
+  dry_run_events: number
+  failed_events: number
+  dropped_events: number
+  suppressed_events: number
+  stream_state: 'connecting' | 'ready' | 'degraded'
+  stream_down_events: number
+  stream_recovery_events: number
+  last_event_at?: string
+  last_error?: string
+}
+
+export type HealthStatus = {
+  status: 'ready' | 'degraded'
+  camera: { configured: boolean; state: string }
+  inference: { state: 'ready' | 'degraded'; last_error?: string }
+  alerts: AlertRuntimeStatus
+  bridge: { state: string }
+}
+
 export type InferenceTarget = 'cpu' | 'gpu' | 'npu' | 'tpu'
 
 export type InferenceCapability = {

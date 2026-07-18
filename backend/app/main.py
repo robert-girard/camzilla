@@ -20,7 +20,12 @@ from .contracts import (
 )
 from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
 from .model_registry import ModelRegistry
-from .pipeline import InferencePipeline, OpenCvRestreamSource, SyntheticFrameSource
+from .pipeline import (
+    InferencePipeline,
+    OpenCvRestreamSource,
+    ReconnectingFrameSource,
+    SyntheticFrameSource,
+)
 from .ptz import PtzBusyError, PtzService, PtzUnavailableError, build_ptz_service
 from .selection import (
     CapabilitySpec,
@@ -91,11 +96,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         restream_source = OpenCvRestreamSource(
             settings.inference_restream_url, settings.inference_fps
         )
-        source = restream_source.frames()
+        reconnecting_source = ReconnectingFrameSource(
+            restream_source.frames, on_state=alert_engine.observe_stream_state
+        )
+        source = reconnecting_source.frames()
         pipeline = InferencePipeline(
-            app.state.worker, source_dropped_frames=lambda: restream_source.dropped_frames
+            app.state.worker,
+            source_dropped_frames=lambda: restream_source.dropped_frames,
+            source_status=lambda: reconnecting_source.status,
         )
     else:
+        alert_engine.observe_stream_state("ready")
         source = SyntheticFrameSource(
             settings.inference_fps, decoded_image=settings.inference_backend == "ultralytics"
         ).frames()
@@ -161,13 +172,14 @@ async def ready() -> dict[str, object]:
     alert_status = alert_engine.status()
     camera_configured = settings.camera_rtsp_url is not None
     source_state = (
-        "error" if pipeline.source_error else "ready" if camera_configured else "synthetic"
+        pipeline.source_state if camera_configured or pipeline.source_error else "synthetic"
     )
     return {
         "status": (
             "ready"
             if backend_health.ready
-            and not pipeline.source_error
+            and source_state in {"ready", "synthetic"}
+            and pipeline.consumer_error is None
             and selection.transition_state == "ready"
             and alert_status.last_error is None
             else "degraded"
@@ -185,6 +197,8 @@ async def ready() -> dict[str, object]:
             "fallback_reason": backend_health.fallback_reason,
             "transition_state": selection.transition_state,
             "transition_error": selection.transition_error,
+            "state": "degraded" if pipeline.consumer_error else "ready",
+            "last_error": pipeline.consumer_error,
         },
         "websocket_clients": app.state.hub.clients,
         "alerts": alert_status.model_dump(mode="json"),
@@ -193,6 +207,7 @@ async def ready() -> dict[str, object]:
             "failed_frames": worker.failed_frames,
             "observer_failures": worker.observer_failures,
             "dropped_frames": pipeline.dropped_frames,
+            "source_reconnects": pipeline.source_reconnects,
             "inference_fps": worker.inference_fps,
             "last_inference_ms": worker.last_inference_ms,
         },

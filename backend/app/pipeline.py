@@ -3,13 +3,74 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from .inference import DetectionWorker, Frame
-from .queueing import LatestItemQueue, consume_latest
+from .queueing import LatestItemQueue
+
+
+@dataclass(frozen=True)
+class SourceStatus:
+    state: str
+    reconnects: int
+    last_error: str | None
+
+
+class ReconnectingFrameSource:
+    """Reopen a frame adapter with bounded exponential backoff after failures."""
+
+    def __init__(
+        self,
+        source_factory: Callable[[], AsyncIterator[Frame]],
+        *,
+        on_state: Callable[[str], None] | None = None,
+        initial_delay: float = 0.25,
+        maximum_delay: float = 10,
+        sleep: Callable[[float], Coroutine[Any, Any, None]] = asyncio.sleep,
+    ) -> None:
+        self.source_factory = source_factory
+        self.on_state = on_state
+        self.initial_delay = initial_delay
+        self.maximum_delay = maximum_delay
+        self.sleep = sleep
+        self.state = "connecting"
+        self.reconnects = 0
+        self.last_error: str | None = None
+
+    @property
+    def status(self) -> SourceStatus:
+        return SourceStatus(self.state, self.reconnects, self.last_error)
+
+    def _transition(self, state: str) -> None:
+        if self.state == state:
+            return
+        self.state = state
+        if self.on_state:
+            self.on_state(state)
+
+    async def frames(self) -> AsyncIterator[Frame]:
+        delay = self.initial_delay
+        while True:
+            try:
+                async for frame in self.source_factory():
+                    self.last_error = None
+                    delay = self.initial_delay
+                    self._transition("ready")
+                    yield frame
+                raise RuntimeError("frame source ended")
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                self.last_error = type(error).__name__
+                self.reconnects += 1
+                self._transition("degraded")
+                await self.sleep(delay)
+                delay = min(delay * 2, self.maximum_delay)
+                self._transition("connecting")
 
 
 class SyntheticFrameSource:
@@ -91,23 +152,61 @@ class OpenCvRestreamSource:
 
 class InferencePipeline:
     def __init__(
-        self, worker: DetectionWorker, source_dropped_frames: Callable[[], int] | None = None
+        self,
+        worker: DetectionWorker,
+        source_dropped_frames: Callable[[], int] | None = None,
+        source_status: Callable[[], SourceStatus] | None = None,
     ) -> None:
         self.worker = worker
         self.queue: LatestItemQueue[Frame] = LatestItemQueue()
         self.source_dropped_frames = source_dropped_frames or (lambda: 0)
+        self.source_status_provider = source_status
         self._consumer: asyncio.Task[None] | None = None
         self._producer: asyncio.Task[None] | None = None
-        self.source_error: str | None = None
+        self._source_error: str | None = None
+        self.consumer_error: str | None = None
         self._accepting_frames = True
 
     @property
     def dropped_frames(self) -> int:
         return self.source_dropped_frames() + self.queue.dropped
 
+    @property
+    def source_error(self) -> str | None:
+        if self.source_status_provider:
+            return self.source_status_provider().last_error
+        return self._source_error
+
+    @source_error.setter
+    def source_error(self, value: str | None) -> None:
+        self._source_error = value
+
+    @property
+    def source_state(self) -> str:
+        if self.source_status_provider:
+            return self.source_status_provider().state
+        return "error" if self._source_error else "ready"
+
+    @property
+    def source_reconnects(self) -> int:
+        return self.source_status_provider().reconnects if self.source_status_provider else 0
+
     async def start(self, source: AsyncIterator[Frame]) -> None:
-        self._consumer = asyncio.create_task(consume_latest(self.queue, self.worker.process))
+        self._consumer = asyncio.create_task(self._consume())
         self._producer = asyncio.create_task(self._sample(source))
+
+    async def _consume(self) -> None:
+        while True:
+            frame = await self.queue.get()
+            try:
+                await self.worker.process(frame)
+                self.consumer_error = None
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                self.consumer_error = type(error).__name__
+            finally:
+                self.queue.done()
 
     async def _sample(self, source: AsyncIterator[Frame]) -> None:
         try:
@@ -118,7 +217,7 @@ class InferencePipeline:
             raise
         except Exception as error:
             # Deliberately report only adapter state, never its source URL.
-            self.source_error = type(error).__name__
+            self._source_error = type(error).__name__
 
     def pause(self) -> None:
         self._accepting_frames = False

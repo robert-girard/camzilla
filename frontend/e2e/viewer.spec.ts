@@ -69,6 +69,14 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       value: () => sockets.at(-1)?.onclose?.(new CloseEvent('close')),
     })
     Object.defineProperty(window, '__camzillaPtzMoves', { value: [] as string[] })
+    const health = { status: 'ready', camera: 'not_configured', inference: 'ready' }
+    Object.defineProperty(window, '__camzillaSetHealth', {
+      value: (status: string, camera: string, inference: string) => {
+        health.status = status
+        health.camera = camera
+        health.inference = inference
+      },
+    })
     window.fetch = async (input, init) => {
       const url = String(input)
       if (url.includes('/api/v1/stream')) {
@@ -121,6 +129,28 @@ async function installMocks(page: Page, options: MockOptions = {}) {
         testWindow.__camzillaPtzMoves.push(body.direction)
         return new Response(JSON.stringify({
           status: 'accepted', direction: body.direction, duration_seconds: body.duration_seconds,
+        }), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/alerts/status')) {
+        return new Response(JSON.stringify({
+          rule: {
+            id: 'person-detected', camera_name: 'front-door', target_classes: ['person'],
+            confidence_threshold: 0.6, debounce_seconds: 300, enabled: true,
+          },
+          requested_notifier: 'dry-run', effective_notifier: 'dry-run',
+          external_delivery_configured: false,
+          configuration_reason: 'Dry-run mode does not send external notifications',
+          queued_events: 0, delivered_events: 2, dry_run_events: 2, failed_events: 0,
+          dropped_events: 0, suppressed_events: 1, stream_state: 'ready',
+          stream_down_events: 0, stream_recovery_events: 0,
+        }), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/health/ready')) {
+        return new Response(JSON.stringify({
+          status: health.status,
+          camera: { configured: false, state: health.camera },
+          inference: { state: health.inference },
+          alerts: {}, bridge: { state: health.camera },
         }), { headers: { 'content-type': 'application/json' } })
       }
       if (settings.videoFailure) return new Response('unavailable', { status: 503 })
@@ -249,4 +279,37 @@ test('reports a PTZ command failure without exposing adapter details', async ({ 
   await page.getByRole('button', { name: 'Zoom in' }).click()
   await expect(page.getByRole('alert')).toHaveText('PTZ command failed')
   await expect(page.getByRole('button', { name: 'Zoom in' })).toBeEnabled()
+})
+
+test('shows the alert rule and external-delivery-safe dry-run state', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const status = page.getByRole('region', { name: 'Alerts and reliability' })
+  await expect(status).toContainText('person at 60%')
+  await expect(status).toContainText('Notifierdry-run')
+  await expect(status).toContainText('2 (2 dry-run)')
+  await expect(status).toContainText('Dry-run mode does not send external notifications')
+})
+
+test('shows system degradation and recovery from health polling', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const status = page.getByRole('region', { name: 'Alerts and reliability' })
+  await expect(status).toContainText('System: ready')
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __camzillaSetHealth: (status: string, camera: string, inference: string) => void
+    }
+    testWindow.__camzillaSetHealth('degraded', 'degraded', 'degraded')
+  })
+  await expect(status).toContainText('System: degraded', { timeout: 2_000 })
+  await expect(status).toContainText('Camera streamdegraded')
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __camzillaSetHealth: (status: string, camera: string, inference: string) => void
+    }
+    testWindow.__camzillaSetHealth('ready', 'ready', 'ready')
+  })
+  await expect(status).toContainText('System: ready', { timeout: 2_000 })
+  await expect(status).toContainText('Camera streamready')
 })

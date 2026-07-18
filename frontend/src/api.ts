@@ -1,5 +1,7 @@
 import type {
   InferenceCapabilitiesResponse,
+  AlertRuntimeStatus,
+  HealthStatus,
   PtzCapability,
   PtzDirection,
   PtzMoveResponse,
@@ -61,4 +63,16 @@ export async function movePtz(cameraName: string, direction: PtzDirection): Prom
   })
   if (!response.ok) throw await responseError(response, 'PTZ command failed')
   return response.json() as Promise<PtzMoveResponse>
+}
+
+export async function getAlertStatus(): Promise<AlertRuntimeStatus> {
+  const response = await fetch('/api/v1/alerts/status')
+  if (!response.ok) throw await responseError(response, 'alert status unavailable')
+  return response.json() as Promise<AlertRuntimeStatus>
+}
+
+export async function getHealthStatus(): Promise<HealthStatus> {
+  const response = await fetch('/health/ready')
+  if (!response.ok) throw await responseError(response, 'system health unavailable')
+  return response.json() as Promise<HealthStatus>
 }

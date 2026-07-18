@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     notifier: str = "dry-run"
     discord_webhook_url: SecretStr | None = None
     discord_delivery_confirmed: bool = False
+    stream_down_alerts_enabled: bool = True
+    stream_down_repeat_seconds: float = Field(default=3600, ge=60, le=86400)
 
     @field_validator("inference_backend")
     @classmethod

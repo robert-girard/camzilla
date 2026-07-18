@@ -125,6 +125,13 @@ API safely falls back to dry-run and reports why without returning the URL.
 Discord requests use bounded timeouts, retries, and rate-limit backoff. Do not
 paste webhook URLs into logs, tests, issues, or browser fields.
 
+The API reconnects the local inference restream with bounded exponential
+backoff and keeps consuming after an isolated inference failure. Stream-down
+alerts fire once on transition and then no more than
+`CAMZILLA_STREAM_DOWN_REPEAT_SECONDS`; recovery is reported once. The page's
+**Alerts and reliability** panel polls the redacted health state so camera,
+inference, and notifier degradation/recovery remain visible.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 

@@ -181,8 +181,9 @@ class SnapshotRenderer:
 @dataclass(frozen=True)
 class AlertCandidate:
     frame: Frame
-    message: DetectionMessage
+    message: DetectionMessage | None
     event: AlertEvent
+    text: str | None = None
 
 
 class AlertEngine:
@@ -198,6 +199,8 @@ class AlertEngine:
         configuration_reason: str | None,
         renderer: SnapshotRenderer | None = None,
         clock: Callable[[], float] = monotonic,
+        stream_down_alerts_enabled: bool = True,
+        stream_down_repeat_seconds: float = 3600,
     ) -> None:
         self.rule = rule
         self.notifier = notifier
@@ -206,6 +209,8 @@ class AlertEngine:
         self.configuration_reason = configuration_reason
         self.renderer = renderer or SnapshotRenderer()
         self.clock = clock
+        self.stream_down_alerts_enabled = stream_down_alerts_enabled
+        self.stream_down_repeat_seconds = stream_down_repeat_seconds
         self.queue: asyncio.Queue[AlertCandidate] = asyncio.Queue(maxsize=1)
         self._delivery_task: asyncio.Task[None] | None = None
         self._last_trigger_at: float | None = None
@@ -216,6 +221,11 @@ class AlertEngine:
         self.suppressed_events = 0
         self.last_event_at: datetime | None = None
         self.last_error: str | None = None
+        self.stream_state: Literal["connecting", "ready", "degraded"] = "connecting"
+        self.stream_down_events = 0
+        self.stream_recovery_events = 0
+        self._stream_down_active = False
+        self._last_stream_down_at: float | None = None
 
     async def start(self) -> None:
         self._delivery_task = asyncio.create_task(self._deliver())
@@ -261,17 +271,68 @@ class AlertEngine:
         except asyncio.QueueFull:
             self.dropped_events += 1
 
+    def observe_stream_state(self, state: str) -> None:
+        if state not in {"connecting", "ready", "degraded"}:
+            return
+        previous = self.stream_state
+        self.stream_state = cast(Literal["connecting", "ready", "degraded"], state)
+        if not self.stream_down_alerts_enabled:
+            return
+        if state == "degraded":
+            now = self.clock()
+            if (
+                self._last_stream_down_at is not None
+                and now - self._last_stream_down_at < self.stream_down_repeat_seconds
+            ):
+                self.suppressed_events += 1
+                return
+            self._last_stream_down_at = now
+            self._stream_down_active = True
+            self.stream_down_events += 1
+            self._enqueue_system_event(
+                "stream-down", f"Camzilla stream is unavailable at {self.rule.camera_name}"
+            )
+        elif state == "ready" and self._stream_down_active and previous != "ready":
+            self._stream_down_active = False
+            self.stream_recovery_events += 1
+            self._enqueue_system_event(
+                "stream-recovered", f"Camzilla stream recovered at {self.rule.camera_name}"
+            )
+
+    def _enqueue_system_event(self, event_class: str, text: str) -> None:
+        event = AlertEvent(
+            rule_id="stream-state",
+            camera_name=self.rule.camera_name,
+            triggered_at=datetime.now(UTC),
+            detection_sequence=0,
+            matched_classes=frozenset({event_class}),
+        )
+        try:
+            self.queue.put_nowait(
+                AlertCandidate(
+                    Frame(1, 1, event.triggered_at),
+                    None,
+                    event,
+                    text,
+                )
+            )
+        except asyncio.QueueFull:
+            self.dropped_events += 1
+
     async def _deliver(self) -> None:
         while True:
             candidate = await self.queue.get()
             try:
-                attachment = await self.renderer.render(
-                    candidate.frame, candidate.message, self.rule.target_classes
-                )
+                attachment = None
+                if candidate.message is not None:
+                    attachment = await self.renderer.render(
+                        candidate.frame, candidate.message, self.rule.target_classes
+                    )
                 classes = ", ".join(sorted(candidate.event.matched_classes))
                 payload = AlertPayload(
                     event=candidate.event,
-                    text=f"Camzilla detected {classes} at {self.rule.camera_name}",
+                    text=candidate.text
+                    or f"Camzilla detected {classes} at {self.rule.camera_name}",
                     attachments=[attachment] if attachment else [],
                 )
                 await self.notifier.send(payload)
@@ -301,6 +362,9 @@ class AlertEngine:
             failed_events=self.failed_events,
             dropped_events=self.dropped_events,
             suppressed_events=self.suppressed_events,
+            stream_state=self.stream_state,
+            stream_down_events=self.stream_down_events,
+            stream_recovery_events=self.stream_recovery_events,
             last_event_at=self.last_event_at,
             last_error=self.last_error,
         )
@@ -347,4 +411,6 @@ def build_alert_engine(settings: Settings) -> AlertEngine:
         requested_notifier=requested,
         external_delivery_configured=configured,
         configuration_reason=reason,
+        stream_down_alerts_enabled=settings.stream_down_alerts_enabled,
+        stream_down_repeat_seconds=settings.stream_down_repeat_seconds,
     )

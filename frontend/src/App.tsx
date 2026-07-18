@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { exchangeWebRtcOffer, getStreamDescriptor } from './api'
+import { AlertStatus } from './AlertStatus'
 import { InferenceSelector } from './InferenceSelector'
 import { isStale, sourceRect } from './overlay'
 import { PtzControls } from './PtzControls'
@@ -179,6 +180,7 @@ export function App() {
         <span>Result age: {age === undefined ? '—' : `${age.toFixed(1)} s`}</span>
       </aside>
       {stream && <PtzControls cameraName={stream.camera_name} />}
+      <AlertStatus />
       <InferenceSelector
         onResetDetections={() => setResult(undefined)}
         onSelectionChange={setConfirmedInference}

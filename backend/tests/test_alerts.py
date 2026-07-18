@@ -127,6 +127,42 @@ async def test_notifier_failure_is_isolated_and_redacted() -> None:
     assert "private" not in status.model_dump_json()
 
 
+@pytest.mark.asyncio
+async def test_stream_down_policy_suppresses_repeats_and_reports_recovery() -> None:
+    times = iter((0.0, 10.0))
+    notifier = RecordingNotifier()
+    engine = AlertEngine(
+        AlertRule(id="person-detected", camera_name="front-door"),
+        notifier,
+        requested_notifier="discord",
+        external_delivery_configured=True,
+        configuration_reason=None,
+        renderer=RecordingRenderer(),
+        clock=lambda: next(times),
+        stream_down_repeat_seconds=60,
+    )
+    await engine.start()
+
+    engine.observe_stream_state("degraded")
+    await engine.queue.join()
+    engine.observe_stream_state("connecting")
+    engine.observe_stream_state("degraded")
+    await engine.queue.join()
+    engine.observe_stream_state("ready")
+    await engine.queue.join()
+    status = engine.status()
+    await engine.close()
+
+    assert [item.text for item in notifier.payloads] == [
+        "Camzilla stream is unavailable at front-door",
+        "Camzilla stream recovered at front-door",
+    ]
+    assert status.stream_down_events == 1
+    assert status.stream_recovery_events == 1
+    assert status.suppressed_events == 1
+    assert status.stream_state == "ready"
+
+
 def test_attachment_contract_rejects_payloads_over_discord_limit() -> None:
     with pytest.raises(ValidationError):
         AlertAttachment(

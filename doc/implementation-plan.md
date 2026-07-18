@@ -274,11 +274,11 @@ The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first came
 - [x] Define alert rule, event, attachment, and notifier contracts; begin with one camera, `person`, confidence threshold, and debounce.
 - [x] Implement an async Discord webhook adapter with timeout, retry/backoff, rate-limit handling, and secret redaction.
 - [x] Capture a bounded in-memory snapshot at trigger time, annotate a copy, and avoid persistence unless explicitly enabled.
-- [~] Add reconnect/backoff and state transitions for camera, restream, inference, and notifier failures.
-- [~] Add stream-down notification policy with state-based suppression to prevent alert storms.
+- [x] Add reconnect/backoff and state transitions for camera, restream, inference, and notifier failures.
+- [x] Add stream-down notification policy with state-based suppression to prevent alert storms.
 - [x] Provide a dry-run notifier and require explicit confirmation/configuration before sending real alerts.
-- [~] Test debounce boundaries, duplicate suppression, attachment limits, retry policy, reconnect, secret redaction, and notifier failure isolation.
-- [~] Add Playwright coverage for PTZ states, alert rule display/dry-run, degraded health, and recovery.
+- [x] Test debounce boundaries, duplicate suppression, attachment limits, retry policy, reconnect, secret redaction, and notifier failure isolation.
+- [x] Add Playwright coverage for PTZ states, alert rule display/dry-run, degraded health, and recovery.
 - [~] Run a sustained production-like x86 smoke through service restart using CPU and available CUDA, recording latency, throughput, memory, and recovery behavior without retaining private media.
 
 ### Exit criteria
@@ -292,6 +292,7 @@ The local x86 deployment becomes a reliable trusted-LAN Tripwire: the first came
 ### Phase 2 validation evidence
 
 - 2026-07-17: PTZ contract, bounds, direction mapping, server throttle, and the timed `ContinuousMove`-only ONVIF adapter passed focused backend tests against a fake service. Frontend lint/type/build, unit tests, and eleven deterministic Playwright flows passed, including PTZ acceptance, operation-verification gating, and redacted failure recovery. Physical movement remains an explicit attended smoke test and was not performed during unattended development.
+- 2026-07-17: The alert and reliability suite passed 65 backend tests plus 8 expected opt-in skips and thirteen Playwright flows. Deterministic adapters covered exact debounce boundaries, bounded annotated attachments, Discord timeout/retry/rate-limit behavior, explicit delivery confirmation, source reconnect, inference/notifier failure isolation, stream-down suppression, and visible degraded/recovered UI states. Per user direction, no real Discord webhook request was sent; live alert delivery remains deferred until an attended session.
 
 ## Phase 3 — Operability, history, and multi-camera groundwork (pre-auth)
 
