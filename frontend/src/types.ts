@@ -7,7 +7,8 @@ export type Detection = {
 }
 
 export type DetectionMessage = {
-  version: 'v1'
+  version: 'v2'
+  camera_id: string
   sequence: number
   capture_timestamp: string
   result_timestamp: string

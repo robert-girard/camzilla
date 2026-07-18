@@ -72,7 +72,7 @@ RTSP isn't natively playable in browsers, so a bridge is needed between the came
 
 **Decision:** use `go2rtc` for RTSP→WebRTC instead of building signaling/media bridging. Its administrative API remains internal and its configuration is generated from runtime secrets. HLS/MJPEG is retained only as a diagnostic fallback.
 
-Detection boxes are not burned into the video. FastAPI sends versioned results over WebSocket; the React page renders them on a separate canvas/SVG overlay. Messages include normalized coordinates, source dimensions, sequence and capture/result timestamps. The client handles resizing/letterboxing, expires stale results, and reports result age. MVP synchronization is best-effort and must be measured rather than assumed.
+Detection boxes are not burned into the video. FastAPI sends versioned, camera-identified results over camera-scoped WebSocket subscriptions; the React page renders them on a separate canvas/SVG overlay. Messages include normalized coordinates, source dimensions, sequence and capture/result timestamps. The client handles resizing/letterboxing, expires stale results, rejects results for another camera, and reports result age. MVP synchronization is best-effort and must be measured rather than assumed.
 
 ## 5. Process Model & Concurrency
 

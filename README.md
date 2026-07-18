@@ -209,9 +209,13 @@ artifacts; it may contain private camera imagery.
 Additional camera definitions may be persisted with environment secret
 references, and the UI renders each camera's independent runtime state. The
 current physical runtime still starts one configured stream. Multi-camera
-inference groundwork uses a shared, size-one-per-camera round-robin scheduler:
-a busy simulated camera can replace only its own stale frame and cannot starve
-a quieter camera. A real second-camera smoke waits for hardware/configuration.
+inference runs through a shared, size-one-per-camera round-robin scheduler: a
+busy source can replace only its own stale frame and cannot starve a quieter
+camera. Version-2 detection messages and metrics carry the camera ID, WebSocket clients
+subscribe to the displayed camera, alert rules route by camera, and clip
+pre-roll buffers remain camera-local. Deterministic two-source integration
+coverage validates this path; a real second-camera smoke still waits for
+hardware/configuration.
 
 The configuration panel exports a versioned JSON backup and validates a local
 JSON file before enabling restore. Exports contain camera/rule settings, the

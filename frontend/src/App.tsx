@@ -13,9 +13,9 @@ type VideoState = 'loading' | 'connected' | 'degraded'
 
 const ttlSeconds = 2
 
-function socketUrl(): string {
+function socketUrl(cameraId: string): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${location.host}/api/v1/detections`
+  return `${protocol}//${location.host}/api/v1/detections?camera_id=${encodeURIComponent(cameraId)}`
 }
 
 export function App() {
@@ -80,7 +80,11 @@ export function App() {
 
     const loadVideo = () => {
       void getStreamDescriptor()
-        .then((descriptor) => { setStream(descriptor); return connectVideo(descriptor) })
+        .then((descriptor) => {
+          setStream(descriptor)
+          connectMetadata(descriptor.camera_name)
+          return connectVideo(descriptor)
+        })
         .catch(() => {
           if (!stopped) {
             setVideoState('degraded')
@@ -88,25 +92,24 @@ export function App() {
           }
         })
     }
-    loadVideo()
-
-    const connectMetadata = () => {
-      socket = new WebSocket(socketUrl())
+    const connectMetadata = (cameraId: string) => {
+      socket = new WebSocket(socketUrl(cameraId))
       socket.onopen = () => setConnection('connected')
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data) as DetectionMessage | { type: 'heartbeat' | 'reset' }
-        if ('version' in message) setResult(message)
-        else if (message.type === 'reset') setResult(undefined)
+        if ('version' in message) {
+          if (message.camera_id === cameraId) setResult(message)
+        } else if (message.type === 'reset') setResult(undefined)
       }
       socket.onclose = () => {
         if (!stopped) {
           setConnection((previous) => previous === 'connected' ? 'degraded' : 'disconnected')
-          metadataRetry = window.setTimeout(connectMetadata, 1_000)
+          metadataRetry = window.setTimeout(() => connectMetadata(cameraId), 1_000)
         }
       }
       socket.onerror = () => socket?.close()
     }
-    connectMetadata()
+    loadVideo()
     return () => {
       stopped = true
       socket?.close()

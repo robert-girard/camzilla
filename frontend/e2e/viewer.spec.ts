@@ -12,7 +12,7 @@ type MockOptions = {
 
 function detectionMessage() {
   return {
-    version: 'v1', sequence: 7, capture_timestamp: new Date().toISOString(),
+    version: 'v2', camera_id: 'front-door', sequence: 7, capture_timestamp: new Date().toISOString(),
     result_timestamp: new Date().toISOString(), source_width: 1280, source_height: 720,
     backend_id: 'fake', model_id: 'yolov8n', target: 'cpu', device: 'synthetic', inference_ms: 4.5, inference_fps: 5,
     detections: [{ class_name: 'person', semantic_id: 'coco:person', native_class_id: 0, confidence: 0.91, box: { x: 0.25, y: 0.2, width: 0.5, height: 0.5 } }],
@@ -39,12 +39,14 @@ async function installMocks(page: Page, options: MockOptions = {}) {
   }))
   await page.addInitScript(({ message, settings, inferenceState }) => {
     const sockets: MockSocket[] = []
+    const socketUrls: string[] = []
     const inference = inferenceState
     class MockSocket {
       onopen: ((event: Event) => void) | null = null
       onmessage: ((event: MessageEvent) => void) | null = null
       onclose: ((event: CloseEvent) => void) | null = null
-      constructor() {
+      constructor(url: string) {
+        socketUrls.push(String(url))
         sockets.push(this)
         setTimeout(() => this.onopen?.(new Event('open')), 0)
         setTimeout(() => this.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ ...message, result_timestamp: new Date().toISOString() }) })), 10)
@@ -73,8 +75,10 @@ async function installMocks(page: Page, options: MockOptions = {}) {
     Object.defineProperty(window, '__camzillaCloseMetadata', {
       value: () => sockets.at(-1)?.onclose?.(new CloseEvent('close')),
     })
+    Object.defineProperty(window, '__camzillaSocketUrls', { value: socketUrls })
     Object.defineProperty(window, '__camzillaPtzMoves', { value: [] as string[] })
     Object.defineProperty(window, '__camzillaLastRuleUpdate', { value: null, writable: true })
+    Object.defineProperty(window, '__camzillaLastRuleId', { value: null, writable: true })
     const catalog = {
       revision: 'coco-person-car-dog-v1', backend_id: 'fake', model_id: 'yolov8n',
       categories: [
@@ -95,6 +99,10 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       alert_rules: [{
         id: 'person-detected', camera_id: 'front-door', enabled: true,
         target_categories: ['coco:person'], confidence_threshold: 0.6, debounce_seconds: 300,
+        schedule_start: null, schedule_end: null, zone: null, version: 1,
+      }, {
+        id: 'side-person', camera_id: 'side-door', enabled: true,
+        target_categories: ['coco:person'], confidence_threshold: 0.65, debounce_seconds: 120,
         schedule_start: null, schedule_end: null, zone: null, version: 1,
       }],
     }
@@ -214,15 +222,22 @@ async function installMocks(page: Page, options: MockOptions = {}) {
           })
         }
         const update = JSON.parse(String(init?.body))
-        const testWindow = window as typeof window & { __camzillaLastRuleUpdate: unknown }
+        const ruleId = decodeURIComponent(url.split('/').at(-1) ?? '')
+        const ruleIndex = configuration.alert_rules.findIndex((rule) => rule.id === ruleId)
+        if (ruleIndex < 0) return new Response(JSON.stringify({ detail: 'alert rule not found' }), { status: 404 })
+        const testWindow = window as typeof window & {
+          __camzillaLastRuleUpdate: unknown
+          __camzillaLastRuleId: string | null
+        }
         testWindow.__camzillaLastRuleUpdate = update
+        testWindow.__camzillaLastRuleId = ruleId
         configuration.version += 1
-        configuration.alert_rules[0] = {
-          ...configuration.alert_rules[0], ...update,
+        configuration.alert_rules[ruleIndex] = {
+          ...configuration.alert_rules[ruleIndex], ...update,
           zone: update.zone ?? null,
           schedule_start: update.schedule_start ?? null,
           schedule_end: update.schedule_end ?? null,
-          version: configuration.alert_rules[0].version + 1,
+          version: configuration.alert_rules[ruleIndex].version + 1,
         }
         persistConfiguration()
         return new Response(JSON.stringify(configuration), { headers: { 'content-type': 'application/json' } })
@@ -310,6 +325,12 @@ test('shows accessible connected diagnostics and a source-coordinate overlay', a
   await expect(page.getByLabel('Diagnostics')).toContainText('Target/device: cpu/synthetic')
   await expect(page.getByLabel('Diagnostics')).toContainText('Video: connected')
   await expect(page.getByRole('button', { name: 'Fullscreen' })).toBeVisible()
+  const socketUrls = await page.evaluate(() => (
+    window as typeof window & { __camzillaSocketUrls: string[] }
+  ).__camzillaSocketUrls)
+  expect(socketUrls.some((url) => (
+    url.includes('/api/v1/detections?camera_id=front-door')
+  ))).toBe(true)
 })
 
 test('switches to an available CPU model only after explicit apply', async ({ page }) => {
@@ -580,6 +601,27 @@ test('edits rule values and draws a normalized zone', async ({ page }) => {
   })
   expect(update.confidence_threshold).toBe(0.75)
   expect(update.zone.points).toHaveLength(3)
+})
+
+test('edits each persisted alert rule for its own camera', async ({ page }) => {
+  await installMocks(page)
+  await page.goto('/')
+  const history = page.getByRole('region', { name: 'Configuration and alert history' })
+  await history.getByLabel('Alert rule').selectOption('side-person')
+  await expect(history.getByLabel('Confidence (%)')).toHaveValue('65')
+  await history.getByLabel('Debounce (seconds)').fill('180')
+  await history.getByRole('button', { name: 'Save rule' }).click()
+  await expect(history.getByText('Rule saved')).toBeVisible()
+  const saved = await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __camzillaLastRuleId: string
+      __camzillaLastRuleUpdate: { debounce_seconds: number; target_categories: string[] }
+    }
+    return { id: testWindow.__camzillaLastRuleId, update: testWindow.__camzillaLastRuleUpdate }
+  })
+  expect(saved.id).toBe('side-person')
+  expect(saved.update.debounce_seconds).toBe(180)
+  expect(saved.update.target_categories).toEqual(['coco:person'])
 })
 
 test('validates incomplete zones and reports optimistic conflicts', async ({ page }) => {

@@ -1,7 +1,7 @@
 # Camzilla Implementation Plan
 
 Status: Phase 3b complete locally; remote GitHub Actions confirmation and the attended Phase 2 PTZ/Discord checks remain pending
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
 ## Document Role and References
@@ -325,6 +325,7 @@ The system becomes convenient for daily personal use before authentication is in
 - 2026-07-17: Multi-camera persistence/API validation and the bounded round-robin scheduler passed 86 backend tests plus 8 expected opt-in skips. Flooding two simulated sources retained only one latest frame per camera and serviced the quieter source after the busy source's single turn. Eighteen Playwright flows passed, including distinct synthetic/degraded camera cards with only the operational camera exposing recording controls. Real second-camera testing remains hardware-dependent.
 - 2026-07-17: Secret-free backup export, field-redacted validation, optimistic restore, external-secret-reference preservation/derivation, migration drift detection, and OpenAPI secret-surface checks passed 91 backend tests plus 8 expected opt-in skips. Nineteen Playwright flows passed, including file validation before restore. A fresh SQLite upgrade reached `0001_phase3_state`, and `alembic check` reported no new upgrade operations.
 - 2026-07-17: An isolated production Compose project first exposed and then regression-tested missing migration assets in the API image. After packaging migrations and non-root-owned data/media mount points, the clean stack reached migration head. A persisted rule edit (0.73 confidence/45-second debounce), two camera definitions, and event history survived forced API-container replacement with the same named volumes; the post-recreate backup contained no secret references. The synthetic containers, network, database volume, and media volume were deleted after verification.
+- 2026-07-18 completion audit: The standalone fairness primitive was wired into the running inference pipeline rather than left as test-only groundwork. A two-source integration test now proves latest-frame round-robin scheduling, distinct per-camera semantic allowlists and metrics, camera-scoped WebSocket publication, alert-rule routing, and clip-buffer isolation. Persisted multi-rule backups activate every rule, and the UI can select and edit each rule for its own camera.
 
 ### Exit criteria
 
@@ -367,7 +368,7 @@ No new model training, arbitrary label creation, semantic remapping guessed from
 - [x] Multiple cameras may use different supported category selections without leaking detections or alert rules across cameras.
 - [x] Backend, migration, frontend, Playwright, backup/export, and compatibility checks pass with deterministic models that expose different class catalogs.
 
-Validation evidence (2026-07-17): 100 backend tests passed with 8 opt-in hardware/runtime skips; Ruff, Mypy, fresh Alembic upgrade/check, schema compatibility, frontend lint/type/unit/build, 21 Playwright flows, repository security checks, both Compose configurations, and production image builds passed. An isolated no-camera production stack switched from `fake-person-v1` to `fake-multi-v1`, persisted `coco:person` plus `coco:car` across forced API recreation, and exported the same selection in a secret-free schema-v2 backup. The isolated containers and volumes were removed after validation.
+Validation evidence (2026-07-18): 107 backend tests passed with 8 opt-in hardware/runtime skips; Ruff, Mypy, fresh Alembic upgrade/check, schema compatibility, frontend lint/type/unit/build, 22 Playwright flows, repository security checks, both Compose configurations, and production image builds passed. Deterministic two-camera runtime coverage proves distinct category publication, metrics, subscriptions, clips, and alert rules without cross-camera leakage. An isolated no-camera production stack switched from `fake-person-v1` to `fake-multi-v1`, persisted `coco:person` plus `coco:car` across forced API recreation, and exported the same selection in a secret-free schema-v2 backup. The isolated containers and volumes were removed after validation.
 
 ## Phase 4 — Keycloak authentication and concurrent administration
 

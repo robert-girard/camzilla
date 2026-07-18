@@ -46,6 +46,7 @@ function draftFrom(rule: AlertRuleConfiguration): RuleDraft {
 
 export function HistoryAndRules() {
   const [configuration, setConfiguration] = useState<GlobalConfiguration>()
+  const [selectedRuleId, setSelectedRuleId] = useState<string>()
   const [draft, setDraft] = useState<RuleDraft>()
   const [events, setEvents] = useState<EventPage>()
   const [eventType, setEventType] = useState('')
@@ -69,7 +70,11 @@ export function HistoryAndRules() {
       setCameraCategoryDrafts(Object.fromEntries(
         selections.map((selection) => [selection.camera_id, selection.selected_category_ids]),
       ))
-      if (value.alert_rules[0]) setDraft(draftFrom(value.alert_rules[0]))
+      setSelectedRuleId((current) => (
+        current && value.alert_rules.some((rule) => rule.id === current)
+          ? current
+          : value.alert_rules[0]?.id
+      ))
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'configuration unavailable')
     }
@@ -82,6 +87,11 @@ export function HistoryAndRules() {
     window.addEventListener('camzilla:inference-changed', reload)
     return () => window.removeEventListener('camzilla:inference-changed', reload)
   }, [loadConfiguration])
+
+  useEffect(() => {
+    const selected = configuration?.alert_rules.find((rule) => rule.id === selectedRuleId)
+    setDraft(selected ? draftFrom(selected) : undefined)
+  }, [configuration, selectedRuleId])
 
   useEffect(() => {
     void getEvents({ page, eventType, sort })
@@ -100,7 +110,7 @@ export function HistoryAndRules() {
   }
 
   const save = async () => {
-    const rule = configuration?.alert_rules[0]
+    const rule = configuration?.alert_rules.find((item) => item.id === selectedRuleId)
     if (!configuration || !rule || !draft) return
     if (draft.zone.length > 0 && draft.zone.length < 3) {
       setError('A zone needs at least three points or must be cleared.')
@@ -120,7 +130,8 @@ export function HistoryAndRules() {
         target_categories: draft.targetCategories,
       })
       setConfiguration(changed)
-      setDraft(draftFrom(changed.alert_rules[0]))
+      const updatedRule = changed.alert_rules.find((item) => item.id === rule.id)
+      if (updatedRule) setDraft(draftFrom(updatedRule))
       setNotice('Rule saved')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'rule update failed')
@@ -207,7 +218,11 @@ export function HistoryAndRules() {
     try {
       const restored = await restoreBackup(configuration.version, backup)
       setConfiguration(restored)
-      if (restored.alert_rules[0]) setDraft(draftFrom(restored.alert_rules[0]))
+      setSelectedRuleId((current) => (
+        current && restored.alert_rules.some((rule) => rule.id === current)
+          ? current
+          : restored.alert_rules[0]?.id
+      ))
       setBackup(undefined)
       setNotice('Configuration restored')
       await loadConfiguration()
@@ -216,7 +231,7 @@ export function HistoryAndRules() {
     }
   }
 
-  const rule = configuration?.alert_rules[0]
+  const rule = configuration?.alert_rules.find((item) => item.id === selectedRuleId)
   const ruleCamera = rule ? configuration?.cameras.find((camera) => camera.id === rule.camera_id) : undefined
   const ruleCatalog = ruleCamera ? categorySelections[ruleCamera.id]?.catalog : undefined
   const ruleCategories = ruleCatalog?.categories.filter(
@@ -274,6 +289,19 @@ export function HistoryAndRules() {
       </div>
       {rule && draft && (
         <form onSubmit={(event) => { event.preventDefault(); void save() }} className="rule-editor">
+          {configuration && configuration.alert_rules.length > 1 && (
+            <label>Alert rule
+              <select
+                aria-label="Alert rule"
+                value={rule.id}
+                onChange={(event) => setSelectedRuleId(event.target.value)}
+              >
+                {configuration.alert_rules.map((item) => (
+                  <option key={item.id} value={item.id}>{item.id} ({item.camera_id})</option>
+                ))}
+              </select>
+            </label>
+          )}
           <h3>Edit {rule.target_categories.map((item) => categoryLabel(item)).join(', ')} rule</h3>
           <CategoryMultiSelect
             label="Alert target categories"
