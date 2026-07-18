@@ -1,3 +1,6 @@
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
 import httpx
 from fastapi.testclient import TestClient
 
@@ -93,6 +96,115 @@ def test_alert_status_defaults_to_external_delivery_safe_dry_run() -> None:
     assert response.json()["effective_notifier"] == "dry-run"
     assert response.json()["external_delivery_configured"] is False
     assert "webhook" not in response.text.lower()
+
+
+def test_persisted_configuration_updates_optimistically_without_secret_values() -> None:
+    with TestClient(app) as client:
+        current = client.get("/api/v1/config")
+        version = current.json()["version"]
+        update = {
+            "expected_config_version": version,
+            "confidence_threshold": 0.72,
+            "debounce_seconds": 60,
+            "schedule_start": "22:00",
+            "schedule_end": "06:00",
+            "zone": {"points": [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}, {"x": 0.5, "y": 0.9}]},
+            "target_categories": ["person"],
+        }
+        changed = client.put("/api/v1/alert-rules/person-detected", json=update)
+        conflict = client.put("/api/v1/alert-rules/person-detected", json=update)
+    assert current.status_code == 200
+    assert "secret_ref" not in current.text
+    assert "rtsp://" not in current.text
+    assert "discord.com/api/webhooks" not in current.text
+    assert changed.status_code == 200
+    assert changed.json()["version"] == version + 1
+    assert changed.json()["alert_rules"][0]["confidence_threshold"] == 0.72
+    assert conflict.status_code == 409
+    assert conflict.json() == {"detail": "configuration version conflict"}
+
+
+def test_rule_update_rejects_invalid_zone_schedule_and_disabled_category() -> None:
+    with TestClient(app) as client:
+        version = client.get("/api/v1/config").json()["version"]
+        invalid_zone = client.put(
+            "/api/v1/alert-rules/person-detected",
+            json={
+                "expected_config_version": version,
+                "confidence_threshold": 0.6,
+                "debounce_seconds": 60,
+                "zone": {
+                    "points": [{"x": 0.1, "y": 0.1}, {"x": 0.2, "y": 0.2}, {"x": 0.3, "y": 0.3}]
+                },
+                "target_categories": ["person"],
+            },
+        )
+        partial_schedule = client.put(
+            "/api/v1/alert-rules/person-detected",
+            json={
+                "expected_config_version": version,
+                "confidence_threshold": 0.6,
+                "debounce_seconds": 60,
+                "schedule_start": "22:00",
+                "target_categories": ["person"],
+            },
+        )
+        disabled_category = client.put(
+            "/api/v1/alert-rules/person-detected",
+            json={
+                "expected_config_version": version,
+                "confidence_threshold": 0.6,
+                "debounce_seconds": 60,
+                "target_categories": ["car"],
+            },
+        )
+    assert invalid_zone.status_code == 422
+    assert partial_schedule.status_code == 422
+    assert disabled_category.status_code == 422
+
+
+def test_event_history_paginates_filters_sorts_and_deletes() -> None:
+    with TestClient(app) as client:
+        repository = app.state.repository
+        baseline = client.get("/api/v1/events?event_type=detection").json()["total"]
+        now = datetime.now(UTC)
+        event_ids = [str(uuid4()) for _ in range(3)]
+        repository.record_event(
+            event_id=event_ids[0],
+            camera_id="front-door",
+            rule_id="person-detected",
+            event_type="detection",
+            triggered_at=now - timedelta(minutes=2),
+            categories=["person"],
+        )
+        repository.record_event(
+            event_id=event_ids[1],
+            camera_id="front-door",
+            rule_id=None,
+            event_type="stream-down",
+            triggered_at=now - timedelta(minutes=1),
+            categories=["stream-down"],
+        )
+        repository.record_event(
+            event_id=event_ids[2],
+            camera_id="front-door",
+            rule_id="person-detected",
+            event_type="detection",
+            triggered_at=now,
+            categories=["person"],
+        )
+        page = client.get("/api/v1/events?page=1&page_size=1&event_type=detection&sort=desc")
+        category = client.get("/api/v1/events?category=stream-down")
+        removed = client.delete(f"/api/v1/events/{event_ids[2]}")
+        missing = client.delete(f"/api/v1/events/{event_ids[2]}")
+    assert page.status_code == 200
+    assert page.json()["total"] == baseline + 2
+    assert page.json()["pages"] == baseline + 2
+    assert page.json()["items"][0]["id"] == event_ids[2]
+    assert category.json()["total"] == 1
+    assert category.json()["items"][0]["event_type"] == "stream-down"
+    assert removed.status_code == 204
+    assert missing.status_code == 404
 
 
 def test_ptz_endpoint_uses_bounded_request_and_redacts_adapter_failure() -> None:

@@ -105,6 +105,40 @@ async def test_successful_switch_resets_results_and_closes_previous_backend() ->
 
 
 @pytest.mark.asyncio
+async def test_successful_switch_persists_confirmed_capability() -> None:
+    persisted = []
+    candidate = TrackingBackend("candidate")
+    service, _initial, _worker, _hub = await make_service({"candidate": candidate})
+
+    async def persist(capability):
+        persisted.append(capability)
+
+    service.selection_changed = persist
+    await service.select(capability_id("fake", "candidate", "cpu"))
+
+    assert persisted == ["fake:candidate:cpu"]
+
+
+@pytest.mark.asyncio
+async def test_persistence_failure_rolls_back_runtime_switch() -> None:
+    candidate = TrackingBackend("candidate")
+    service, initial, worker, _hub = await make_service({"candidate": candidate})
+
+    async def fail_persistence(_capability):
+        raise RuntimeError("private database details")
+
+    service.selection_changed = fail_persistence
+    with pytest.raises(SelectionError, match="persistence failed") as error:
+        await service.select(capability_id("fake", "candidate", "cpu"))
+
+    assert "private database" not in str(error.value)
+    assert worker.backend is initial
+    assert service.response().active.model_id == "initial"
+    assert candidate.closed == 1
+    assert initial.closed == 0
+
+
+@pytest.mark.asyncio
 async def test_failed_switch_keeps_previous_backend_and_redacts_failure() -> None:
     candidate = TrackingBackend("broken", fail_load=True)
     service, initial, worker, _hub = await make_service({"broken": candidate})

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 
@@ -111,6 +111,7 @@ def build_capability_specs(
 
 
 BackendFactory = Callable[[CapabilitySpec], InferenceBackend]
+SelectionChanged = Callable[[str], Awaitable[None]]
 
 
 class InferenceSelectionService:
@@ -123,6 +124,7 @@ class InferenceSelectionService:
         pipeline: InferencePipeline,
         hub: DetectionHub,
         backend_factory: BackendFactory,
+        selection_changed: SelectionChanged | None = None,
     ) -> None:
         if active_capability_id not in specs:
             raise RuntimeError("active inference capability is not registered")
@@ -133,6 +135,7 @@ class InferenceSelectionService:
         self.pipeline = pipeline
         self.hub = hub
         self.backend_factory = backend_factory
+        self.selection_changed = selection_changed
         self.transition_state: TransitionState = "ready"
         self.transition_error: str | None = None
         self._switch_lock = asyncio.Lock()
@@ -200,6 +203,19 @@ class InferenceSelectionService:
                     self.transition_state = "degraded"
                     self.transition_error = "switch failed; previous inference remains active"
                     raise SelectionError("failed", self.transition_error) from error
+
+                if self.selection_changed:
+                    try:
+                        await self.selection_changed(requested_id)
+                    except Exception as error:
+                        await self.worker.replace_backend(previous)
+                        with suppress(Exception):
+                            await candidate.close()
+                        self.transition_state = "degraded"
+                        self.transition_error = (
+                            "switch persistence failed; previous inference remains active"
+                        )
+                        raise SelectionError("failed", self.transition_error) from error
 
                 self.pipeline.reset()
                 await self.hub.reset()

@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,6 +43,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+pysqlite:///:memory:"
     media_root: str = "/media"
     media_quota_bytes: int = Field(default=5 * 1024 * 1024 * 1024, ge=1024 * 1024)
+    timezone: str = "UTC"
 
     @field_validator("inference_backend")
     @classmethod
@@ -75,6 +77,15 @@ class Settings(BaseSettings):
     def valid_notifier(cls, value: str) -> str:
         if value not in {"dry-run", "discord"}:
             raise ValueError("must be dry-run or discord")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("must be an IANA time zone") from error
         return value
 
     @property

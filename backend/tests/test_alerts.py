@@ -163,6 +163,58 @@ async def test_stream_down_policy_suppresses_repeats_and_reports_recovery() -> N
     assert status.stream_state == "ready"
 
 
+def test_alert_rule_applies_overnight_schedule_and_normalized_zone() -> None:
+    frame = Frame(640, 480, datetime.now(UTC))
+    outside_zone = AlertEngine(
+        AlertRule(
+            id="person-detected",
+            camera_name="front-door",
+            schedule_start="22:00",
+            schedule_end="06:00",
+            zone=[(0.7, 0.1), (0.95, 0.1), (0.95, 0.9), (0.7, 0.9)],
+        ),
+        DryRunNotifier(),
+        requested_notifier="dry-run",
+        external_delivery_configured=False,
+        configuration_reason=None,
+        wall_clock=lambda: datetime(2026, 7, 17, 23, 0, tzinfo=UTC),
+    )
+    outside_zone.observe(frame, detection_message())
+    assert outside_zone.queue.qsize() == 0
+
+    inactive_schedule = AlertEngine(
+        AlertRule(
+            id="person-detected",
+            camera_name="front-door",
+            schedule_start="22:00",
+            schedule_end="06:00",
+        ),
+        DryRunNotifier(),
+        requested_notifier="dry-run",
+        external_delivery_configured=False,
+        configuration_reason=None,
+        wall_clock=lambda: datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+    )
+    inactive_schedule.observe(frame, detection_message())
+    assert inactive_schedule.queue.qsize() == 0
+
+    active = AlertEngine(
+        AlertRule(
+            id="person-detected",
+            camera_name="front-door",
+            schedule_start="22:00",
+            schedule_end="06:00",
+        ),
+        DryRunNotifier(),
+        requested_notifier="dry-run",
+        external_delivery_configured=False,
+        configuration_reason=None,
+        wall_clock=lambda: datetime(2026, 7, 17, 23, 0, tzinfo=UTC),
+    )
+    active.observe(frame, detection_message())
+    assert active.queue.qsize() == 1
+
+
 def test_attachment_contract_rejects_payloads_over_discord_limit() -> None:
     with pytest.raises(ValidationError):
         AlertAttachment(

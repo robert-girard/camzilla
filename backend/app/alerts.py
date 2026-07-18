@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, Literal, Protocol, cast
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -30,6 +31,9 @@ class Notifier(Protocol):
     def mode(self) -> Literal["dry-run", "discord"]: ...
 
     async def send(self, payload: AlertPayload) -> None: ...
+
+
+EventSink = Callable[[AlertPayload], Coroutine[Any, Any, None]]
 
 
 class NotifierDeliveryError(Exception):
@@ -201,6 +205,8 @@ class AlertEngine:
         clock: Callable[[], float] = monotonic,
         stream_down_alerts_enabled: bool = True,
         stream_down_repeat_seconds: float = 3600,
+        event_sink: EventSink | None = None,
+        wall_clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.rule = rule
         self.notifier = notifier
@@ -211,12 +217,15 @@ class AlertEngine:
         self.clock = clock
         self.stream_down_alerts_enabled = stream_down_alerts_enabled
         self.stream_down_repeat_seconds = stream_down_repeat_seconds
+        self.event_sink = event_sink
+        self.wall_clock = wall_clock or (lambda: datetime.now(UTC))
         self.queue: asyncio.Queue[AlertCandidate] = asyncio.Queue(maxsize=1)
         self._delivery_task: asyncio.Task[None] | None = None
         self._last_trigger_at: float | None = None
         self.delivered_events = 0
         self.dry_run_events = 0
         self.failed_events = 0
+        self.persistence_failures = 0
         self.dropped_events = 0
         self.suppressed_events = 0
         self.last_event_at: datetime | None = None
@@ -231,13 +240,17 @@ class AlertEngine:
         self._delivery_task = asyncio.create_task(self._deliver())
 
     def observe(self, frame: Frame, message: DetectionMessage) -> None:
-        if not self.rule.enabled or message.detections == []:
+        if not self.rule.enabled or message.detections == [] or not self._schedule_active():
             return
         matched = [
             item
             for item in message.detections
             if item.class_name in self.rule.target_classes
             and item.confidence >= self.rule.confidence_threshold
+            and self._inside_zone(
+                item.box.x + item.box.width / 2,
+                item.box.y + item.box.height / 2,
+            )
         ]
         if not matched:
             return
@@ -261,7 +274,7 @@ class AlertEngine:
             AlertEvent(
                 rule_id=self.rule.id,
                 camera_name=self.rule.camera_name,
-                triggered_at=datetime.now(UTC),
+                triggered_at=self.wall_clock(),
                 detection_sequence=message.sequence,
                 matched_classes=frozenset(item.class_name for item in matched),
             ),
@@ -270,6 +283,34 @@ class AlertEngine:
             self.queue.put_nowait(candidate)
         except asyncio.QueueFull:
             self.dropped_events += 1
+
+    def _schedule_active(self) -> bool:
+        if self.rule.schedule_start is None or self.rule.schedule_end is None:
+            return True
+        current = self.wall_clock()
+        minute = current.hour * 60 + current.minute
+        start_hour, start_minute = (int(value) for value in self.rule.schedule_start.split(":"))
+        end_hour, end_minute = (int(value) for value in self.rule.schedule_end.split(":"))
+        start = start_hour * 60 + start_minute
+        end = end_hour * 60 + end_minute
+        if start == end:
+            return True
+        return start <= minute < end if start < end else minute >= start or minute < end
+
+    def _inside_zone(self, x: float, y: float) -> bool:
+        points = self.rule.zone
+        if points is None:
+            return True
+        inside = False
+        previous = points[-1]
+        for point in points:
+            x1, y1 = previous
+            x2, y2 = point
+            crosses = (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1
+            if crosses:
+                inside = not inside
+            previous = point
+        return inside
 
     def observe_stream_state(self, state: str) -> None:
         if state not in {"connecting", "ready", "degraded"}:
@@ -303,7 +344,7 @@ class AlertEngine:
         event = AlertEvent(
             rule_id="stream-state",
             camera_name=self.rule.camera_name,
-            triggered_at=datetime.now(UTC),
+            triggered_at=self.wall_clock(),
             detection_sequence=0,
             matched_classes=frozenset({event_class}),
         )
@@ -335,12 +376,19 @@ class AlertEngine:
                     or f"Camzilla detected {classes} at {self.rule.camera_name}",
                     attachments=[attachment] if attachment else [],
                 )
+                persistence_failed = False
+                if self.event_sink:
+                    try:
+                        await self.event_sink(payload)
+                    except Exception:
+                        self.persistence_failures += 1
+                        persistence_failed = True
                 await self.notifier.send(payload)
                 self.delivered_events += 1
                 if self.notifier.mode == "dry-run":
                     self.dry_run_events += 1
                 self.last_event_at = candidate.event.triggered_at
-                self.last_error = None
+                self.last_error = "event persistence failed" if persistence_failed else None
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -360,6 +408,7 @@ class AlertEngine:
             delivered_events=self.delivered_events,
             dry_run_events=self.dry_run_events,
             failed_events=self.failed_events,
+            persistence_failures=self.persistence_failures,
             dropped_events=self.dropped_events,
             suppressed_events=self.suppressed_events,
             stream_state=self.stream_state,
@@ -376,7 +425,7 @@ class AlertEngine:
                 await self._delivery_task
 
 
-def build_alert_engine(settings: Settings) -> AlertEngine:
+def build_alert_engine(settings: Settings, event_sink: EventSink | None = None) -> AlertEngine:
     rule = AlertRule(
         id="person-detected",
         camera_name=settings.camera_name,
@@ -413,4 +462,6 @@ def build_alert_engine(settings: Settings) -> AlertEngine:
         configuration_reason=reason,
         stream_down_alerts_enabled=settings.stream_down_alerts_enabled,
         stream_down_repeat_seconds=settings.stream_down_repeat_seconds,
+        event_sink=event_sink,
+        wall_clock=lambda: datetime.now(ZoneInfo(settings.timezone)),
     )

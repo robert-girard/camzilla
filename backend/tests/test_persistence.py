@@ -67,6 +67,24 @@ def test_active_selection_and_optimistic_rule_update_survive_sessions(repository
         )
 
 
+def test_verified_capability_results_persist_without_adapter_configuration(repository) -> None:
+    repository.set_camera_capabilities(
+        "front-door",
+        {
+            "ptz": {"available": False, "unavailable_reason": "PTZ is not enabled"},
+            "inference": [{"id": "fake:fake-person-v1:cpu", "available": True}],
+        },
+    )
+    configuration = repository.configuration()
+    capabilities = configuration.cameras[0].capabilities
+    assert capabilities["ptz"] == {
+        "available": False,
+        "unavailable_reason": "PTZ is not enabled",
+    }
+    assert "password" not in str(capabilities).lower()
+    assert "://" not in str(capabilities)
+
+
 def test_event_metadata_persists_without_media_blobs(repository) -> None:
     event_id = str(uuid4())
     repository.record_event(

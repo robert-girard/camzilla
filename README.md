@@ -132,6 +132,30 @@ alerts fire once on transition and then no more than
 **Alerts and reliability** panel polls the redacted health state so camera,
 inference, and notifier degradation/recovery remain visible.
 
+### Persistent configuration and history
+
+Production Compose stores SQLite metadata in the `camzilla_data` volume and
+media in the separate `camzilla_media` volume. Startup applies versioned
+Alembic migrations before accepting requests. The database stores camera and
+notifier secret references such as environment-variable names, never plaintext
+credentials, webhook URLs, authenticated stream URLs, snapshots, or clips.
+Keep the SQLite database and WAL on local storage, not NFS/SMB.
+
+The global configuration has an optimistic version. A stale rule edit receives
+HTTP 409 instead of overwriting a newer change. The active inference selection,
+camera capability results, rule settings, and event metadata survive container
+restart. Inspect migration state without exposing configuration values:
+
+```sh
+docker compose exec api alembic current
+docker compose exec api alembic check
+```
+
+SQLite is the supported single-node store. A PostgreSQL repository becomes
+appropriate only for multiple application instances, a shared/remote database,
+or measured sustained write contention; changing the URL alone is not yet a
+supported migration procedure.
+
 To run the optional real-model contract check, download the verified weight
 listed in `models/manifest.yaml` and use a redistributable fixture image:
 

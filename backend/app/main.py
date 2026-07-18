@@ -3,14 +3,21 @@ import importlib.util
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Literal
+from uuid import UUID
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 
 from .alerts import AlertEngine, build_alert_engine
 from .config import Settings, get_settings
 from .contracts import (
+    AlertPayload,
+    AlertRule,
+    AlertRuleUpdate,
     AlertRuntimeStatus,
+    EventPage,
+    GlobalConfiguration,
     InferenceCapabilitiesResponse,
     InferenceSelectionRequest,
     PtzCapabilityResponse,
@@ -20,6 +27,7 @@ from .contracts import (
 )
 from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
 from .model_registry import ModelRegistry
+from .persistence import ConfigurationConflictError, Database, Repository
 from .pipeline import (
     InferencePipeline,
     OpenCvRestreamSource,
@@ -78,9 +86,54 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backend = build_backend(settings)
     await backend.load()
     backend_health = await backend.health()
+    active_id = capability_id(
+        backend_health.backend_id, backend_health.model_id, backend_health.target
+    )
+    database = Database(settings.database_url)
+    await asyncio.to_thread(database.migrate)
+    repository = Repository(database)
+    await asyncio.to_thread(repository.seed, settings.camera_name, active_id)
+    app.state.database = database
+    app.state.repository = repository
+
+    async def persist_event(payload: AlertPayload) -> None:
+        event_type = (
+            "detection"
+            if payload.event.rule_id != "stream-state"
+            else next(iter(payload.event.matched_classes), "stream-state")
+        )
+        await asyncio.to_thread(
+            repository.record_event,
+            event_id=str(payload.event.id),
+            camera_id=payload.event.camera_name,
+            rule_id=payload.event.rule_id if payload.event.rule_id != "stream-state" else None,
+            event_type=event_type,
+            triggered_at=payload.event.triggered_at,
+            categories=sorted(payload.event.matched_classes),
+        )
+
     hub = DetectionHub()
     app.state.hub = hub
-    alert_engine = build_alert_engine(settings)
+    alert_engine = build_alert_engine(settings, event_sink=persist_event)
+    persisted_configuration = await asyncio.to_thread(repository.configuration)
+    persisted_rule = next(
+        item for item in persisted_configuration.alert_rules if item.id == "person-detected"
+    )
+    alert_engine.rule = AlertRule(
+        id=persisted_rule.id,
+        camera_name=settings.camera_name,
+        target_classes=frozenset(persisted_rule.target_categories),
+        confidence_threshold=persisted_rule.confidence_threshold,
+        debounce_seconds=persisted_rule.debounce_seconds,
+        enabled=persisted_rule.enabled,
+        schedule_start=persisted_rule.schedule_start,
+        schedule_end=persisted_rule.schedule_end,
+        zone=(
+            [(point.x, point.y) for point in persisted_rule.zone.points]
+            if persisted_rule.zone
+            else None
+        ),
+    )
     await alert_engine.start()
     app.state.alert_engine = alert_engine
     app.state.worker = DetectionWorker(
@@ -119,9 +172,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cuda_available=cuda_is_available(),
         include_fake=settings.inference_backend == "fake",
     )
-    active_id = capability_id(
-        backend_health.backend_id, backend_health.model_id, backend_health.target
-    )
     if settings.inference_backend == "ultralytics":
         artifact = registry.artifact_status(settings.model_id, Path(settings.resolved_model_path))
         existing = specs[active_id]
@@ -130,6 +180,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             str(artifact.path),
             existing.requested_device,
         )
+
+    async def persist_selection(selected_id: str) -> None:
+        await asyncio.to_thread(repository.set_active_capability, selected_id)
+
     selection = InferenceSelectionService(
         specs,
         active_id,
@@ -140,7 +194,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         backend_for_capability,
     )
     app.state.selection = selection
-    app.state.ptz = build_ptz_service(settings)
+    persisted_id = await asyncio.to_thread(repository.active_capability_id)
+    if persisted_id != active_id:
+        persisted_spec = specs.get(persisted_id)
+        if persisted_spec and persisted_spec.capability.available:
+            await selection.select(persisted_id)
+        else:
+            selection.transition_state = "degraded"
+            selection.transition_error = "persisted inference selection is unavailable"
+    selection.selection_changed = persist_selection
+    ptz_service = build_ptz_service(settings)
+    app.state.ptz = ptz_service
+    await asyncio.to_thread(
+        repository.set_camera_capabilities,
+        settings.camera_name,
+        {
+            "ptz": ptz_service.capability.model_dump(mode="json"),
+            "inference": [
+                {
+                    "id": spec.capability.id,
+                    "target": spec.capability.target,
+                    "available": spec.capability.available,
+                    "unavailable_reason": spec.capability.unavailable_reason,
+                }
+                for spec in specs.values()
+            ],
+        },
+    )
     heartbeat = asyncio.create_task(hub.heartbeat())
     try:
         yield
@@ -151,6 +231,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await pipeline.close()
         await alert_engine.close()
         await app.state.worker.backend.close()
+        database.close()
 
 
 app = FastAPI(title="Camzilla API", version="0.1.0", lifespan=lifespan)
@@ -219,6 +300,84 @@ async def ready() -> dict[str, object]:
 async def alert_status() -> AlertRuntimeStatus:
     alert_engine: AlertEngine = app.state.alert_engine
     return alert_engine.status()
+
+
+@app.get("/api/v1/config", response_model=GlobalConfiguration)
+async def configuration() -> GlobalConfiguration:
+    repository: Repository = app.state.repository
+    return await asyncio.to_thread(repository.configuration)
+
+
+@app.put("/api/v1/alert-rules/{rule_id}", response_model=GlobalConfiguration)
+async def update_alert_rule(rule_id: str, request: AlertRuleUpdate) -> GlobalConfiguration:
+    repository: Repository = app.state.repository
+    current = await asyncio.to_thread(repository.configuration)
+    rule = next((item for item in current.alert_rules if item.id == rule_id), None)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="alert rule not found")
+    camera = next(item for item in current.cameras if item.id == rule.camera_id)
+    if not set(request.target_categories) <= set(camera.allowed_categories):
+        raise HTTPException(status_code=422, detail="rule category is not enabled for camera")
+    zone = (
+        [[point.x, point.y] for point in request.zone.points] if request.zone is not None else None
+    )
+    try:
+        await asyncio.to_thread(
+            repository.update_rule,
+            rule_id,
+            expected_config_version=request.expected_config_version,
+            confidence_threshold=request.confidence_threshold,
+            debounce_seconds=request.debounce_seconds,
+            schedule_start=request.schedule_start,
+            schedule_end=request.schedule_end,
+            zone=zone,
+            target_categories=request.target_categories,
+        )
+    except ConfigurationConflictError as error:
+        raise HTTPException(status_code=409, detail="configuration version conflict") from error
+    alert_engine: AlertEngine = app.state.alert_engine
+    alert_engine.rule = AlertRule(
+        id=rule_id,
+        camera_name=camera.name,
+        target_classes=frozenset(request.target_categories),
+        confidence_threshold=request.confidence_threshold,
+        debounce_seconds=request.debounce_seconds,
+        enabled=rule.enabled,
+        schedule_start=request.schedule_start,
+        schedule_end=request.schedule_end,
+        zone=([(point.x, point.y) for point in request.zone.points] if request.zone else None),
+    )
+    return await asyncio.to_thread(repository.configuration)
+
+
+@app.get("/api/v1/events", response_model=EventPage)
+async def event_history(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    camera_id: str | None = None,
+    event_type: str | None = None,
+    category: str | None = None,
+    sort: Literal["asc", "desc"] = "desc",
+) -> EventPage:
+    repository: Repository = app.state.repository
+    return await asyncio.to_thread(
+        repository.list_events,
+        page=page,
+        page_size=page_size,
+        camera_id=camera_id,
+        event_type=event_type,
+        category=category,
+        descending=sort == "desc",
+    )
+
+
+@app.delete("/api/v1/events/{event_id}", status_code=204)
+async def delete_event(event_id: UUID) -> Response:
+    repository: Repository = app.state.repository
+    removed = await asyncio.to_thread(repository.delete_event, str(event_id))
+    if removed is None:
+        raise HTTPException(status_code=404, detail="event not found")
+    return Response(status_code=204)
 
 
 @app.get("/api/v1/inference", response_model=InferenceCapabilitiesResponse)
