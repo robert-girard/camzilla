@@ -34,6 +34,17 @@ class DetectionHub:
         for client in stale:
             self.disconnect(client)
 
+    async def reset(self) -> None:
+        self.last_message = None
+        stale: list[WebSocket] = []
+        for client in self._clients:
+            try:
+                await client.send_json({"type": "reset"})
+            except Exception:
+                stale.append(client)
+        for client in stale:
+            self.disconnect(client)
+
     async def heartbeat(self) -> None:
         while True:
             await asyncio.sleep(15)

@@ -25,6 +25,12 @@ class LatestItemQueue(Generic[T]):
     def done(self) -> None:
         self._queue.task_done()
 
+    def reset(self) -> None:
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+        self.dropped = 0
+
 
 async def consume_latest(
     queue: LatestItemQueue[T], handler: Callable[[T], Awaitable[object]]

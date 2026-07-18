@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 1 complete; Phase 1b planned (local-first model/inference selection UI; Orange Pi deployment deferred until post-auth Phase 4b)
+Status: Phase 1 complete; Phase 1b in progress (local-first model/inference selection UI; Orange Pi deployment deferred until post-auth Phase 4b)
 Last updated: 2026-07-17
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -214,13 +214,13 @@ No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence
 
 #### Selection contracts and lifecycle
 
-- [ ] Define a backend-neutral inference capability contract containing stable backend, model, and target IDs; target category (`cpu`, `gpu`, `npu`, or `tpu`); compatibility; availability; unavailability reason; active state; and backend/model metadata.
-- [ ] Expose typed endpoints to read capabilities and the active selection and to request a supported selection; reject unknown, unavailable, unhealthy, or incompatible combinations without accepting arbitrary paths, URLs, or secret-bearing values.
-- [ ] Enumerate all six managed YOLO development weights for Ultralytics CPU and for CUDA GPU only when CUDA is verified available; report a redacted, actionable reason for every unavailable GPU, NPU, or TPU option.
-- [ ] Serialize concurrent selection requests and implement a transactional worker switch: stop intake, initialize and warm the candidate, atomically publish it only on success, close the previous backend after the swap, and retain or restore the previous healthy backend on failure.
-- [ ] Reset bounded queues and detection sequence state across a successful switch so results from the previous model/target cannot be presented as current; keep video available and report an explicit switching/degraded state.
-- [ ] Keep environment variables as restart defaults and store the selected combination only in memory until Phase 3 persistence is implemented.
-- [ ] Update health, readiness, diagnostics, and detection metadata immediately after a successful switch with the active backend, target, model, device, fallback, and transition status.
+- [x] Define a backend-neutral inference capability contract containing stable backend, model, and target IDs; target category (`cpu`, `gpu`, `npu`, or `tpu`); compatibility; availability; unavailability reason; active state; and backend/model metadata.
+- [x] Expose typed endpoints to read capabilities and the active selection and to request a supported selection; reject unknown, unavailable, unhealthy, or incompatible combinations without accepting arbitrary paths, URLs, or secret-bearing values.
+- [x] Enumerate all six managed YOLO development weights for Ultralytics CPU and for CUDA GPU only when CUDA is verified available; report a redacted, actionable reason for every unavailable GPU, NPU, or TPU option.
+- [x] Serialize concurrent selection requests and implement a transactional worker switch: stop intake, initialize and warm the candidate, atomically publish it only on success, close the previous backend after the swap, and retain or restore the previous healthy backend on failure.
+- [x] Reset bounded queues and detection sequence state across a successful switch so results from the previous model/target cannot be presented as current; keep video available and report an explicit switching/degraded state.
+- [x] Keep environment variables as restart defaults and store the selected combination only in memory until Phase 3 persistence is implemented.
+- [x] Update health, readiness, diagnostics, and detection metadata immediately after a successful switch with the active backend, target, model, device, fallback, and transition status.
 
 #### Frontend
 

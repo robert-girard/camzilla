@@ -1,14 +1,28 @@
 import asyncio
+import importlib.util
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from .config import Settings, get_settings
-from .contracts import StreamDescriptor
+from .contracts import (
+    InferenceCapabilitiesResponse,
+    InferenceSelectionRequest,
+    StreamDescriptor,
+)
 from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
+from .model_registry import ModelRegistry
 from .pipeline import InferencePipeline, OpenCvRestreamSource, SyntheticFrameSource
+from .selection import (
+    CapabilitySpec,
+    InferenceSelectionService,
+    SelectionError,
+    build_capability_specs,
+    capability_id,
+)
 from .transport import DetectionHub
 
 
@@ -17,16 +31,43 @@ def build_backend(settings: Settings) -> InferenceBackend:
         return UltralyticsBackend(
             settings.model_id, settings.resolved_model_path, settings.inference_device
         )
-    return FakeInferenceBackend(settings.model_id)
+    return FakeInferenceBackend()
+
+
+def cuda_is_available() -> bool:
+    if importlib.util.find_spec("torch") is None:
+        return False
+    import torch
+
+    return bool(torch.cuda.is_available())
+
+
+def backend_for_capability(spec: CapabilitySpec) -> InferenceBackend:
+    if spec.capability.backend_id == "fake":
+        return FakeInferenceBackend(
+            spec.capability.model_id, spec.capability.device, spec.capability.target
+        )
+    if spec.capability.backend_id == "ultralytics" and spec.model_path:
+        return UltralyticsBackend(spec.capability.model_id, spec.model_path, spec.requested_device)
+    raise RuntimeError("unsupported inference capability")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    registry = ModelRegistry(
+        settings.resolved_model_manifest_path, settings.resolved_model_directory
+    )
+    if settings.inference_backend == "ultralytics":
+        configured_artifact = registry.artifact_status(
+            settings.model_id, Path(settings.resolved_model_path)
+        )
+        if not configured_artifact.verified:
+            raise RuntimeError("configured model artifact is not checksum verified")
     backend = build_backend(settings)
     await backend.load()
+    backend_health = await backend.health()
     hub = DetectionHub()
-    app.state.backend = backend
     app.state.hub = hub
     app.state.worker = DetectionWorker(
         backend, settings.class_filter, settings.confidence_threshold, hub.publish
@@ -48,6 +89,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pipeline = InferencePipeline(app.state.worker)
     await pipeline.start(source)
     app.state.pipeline = pipeline
+    specs = build_capability_specs(
+        registry,
+        runtime_available=importlib.util.find_spec("ultralytics") is not None,
+        cuda_available=cuda_is_available(),
+        include_fake=settings.inference_backend == "fake",
+    )
+    active_id = capability_id(
+        backend_health.backend_id, backend_health.model_id, backend_health.target
+    )
+    if settings.inference_backend == "ultralytics":
+        artifact = registry.artifact_status(settings.model_id, Path(settings.resolved_model_path))
+        existing = specs[active_id]
+        specs[active_id] = CapabilitySpec(
+            existing.capability.model_copy(update={"available": True, "unavailable_reason": None}),
+            str(artifact.path),
+            existing.requested_device,
+        )
+    selection = InferenceSelectionService(
+        specs,
+        active_id,
+        backend_health,
+        app.state.worker,
+        pipeline,
+        hub,
+        backend_for_capability,
+    )
+    app.state.selection = selection
     heartbeat = asyncio.create_task(hub.heartbeat())
     try:
         yield
@@ -56,7 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with suppress(asyncio.CancelledError):
             await heartbeat
         await pipeline.close()
-        await backend.close()
+        await app.state.worker.backend.close()
 
 
 app = FastAPI(title="Camzilla API", version="0.1.0", lifespan=lifespan)
@@ -70,7 +138,8 @@ async def live() -> dict[str, str]:
 @app.get("/health/ready")
 async def ready() -> dict[str, object]:
     settings = get_settings()
-    backend_health = await app.state.backend.health()
+    selection: InferenceSelectionService = app.state.selection
+    backend_health = await selection.worker.backend.health()
     worker: DetectionWorker = app.state.worker
     pipeline: InferencePipeline = app.state.pipeline
     camera_configured = settings.camera_rtsp_url is not None
@@ -78,7 +147,13 @@ async def ready() -> dict[str, object]:
         "error" if pipeline.source_error else "ready" if camera_configured else "synthetic"
     )
     return {
-        "status": "ready" if backend_health.ready and not pipeline.source_error else "degraded",
+        "status": (
+            "ready"
+            if backend_health.ready
+            and not pipeline.source_error
+            and selection.transition_state == "ready"
+            else "degraded"
+        ),
         "camera": {
             "configured": camera_configured,
             "state": "not_configured" if not camera_configured else source_state,
@@ -88,7 +163,10 @@ async def ready() -> dict[str, object]:
             "model": backend_health.model_id,
             "ready": backend_health.ready,
             "device": backend_health.device,
+            "target": backend_health.target,
             "fallback_reason": backend_health.fallback_reason,
+            "transition_state": selection.transition_state,
+            "transition_error": selection.transition_error,
         },
         "websocket_clients": app.state.hub.clients,
         "metrics": {
@@ -100,6 +178,26 @@ async def ready() -> dict[str, object]:
         },
         "bridge": {"state": source_state},
     }
+
+
+@app.get("/api/v1/inference", response_model=InferenceCapabilitiesResponse)
+async def inference_capabilities() -> InferenceCapabilitiesResponse:
+    selection: InferenceSelectionService = app.state.selection
+    return selection.response()
+
+
+@app.put("/api/v1/inference/selection", response_model=InferenceCapabilitiesResponse)
+async def select_inference(
+    request: InferenceSelectionRequest,
+) -> InferenceCapabilitiesResponse:
+    selection: InferenceSelectionService = app.state.selection
+    try:
+        return await selection.select(request.capability_id)
+    except SelectionError as error:
+        status_code = (
+            404 if error.kind == "not_found" else 409 if error.kind == "unavailable" else 503
+        )
+        raise HTTPException(status_code=status_code, detail=error.public_message) from error
 
 
 @app.get("/api/v1/stream", response_model=StreamDescriptor)

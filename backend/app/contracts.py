@@ -32,6 +32,8 @@ class DetectionMessage(BaseModel):
     source_height: int = Field(gt=0)
     backend_id: str
     model_id: str
+    target: Literal["cpu", "gpu", "npu", "tpu"]
+    device: str
     inference_ms: float = Field(ge=0)
     inference_fps: float = Field(ge=0)
     detections: list[Detection]
@@ -41,3 +43,49 @@ class StreamDescriptor(BaseModel):
     camera_name: str
     webrtc_path: str = "/api/v1/webrtc"
     diagnostic_fallback: Literal["hls", "mjpeg"] = "hls"
+
+
+InferenceTarget = Literal["cpu", "gpu", "npu", "tpu"]
+TransitionState = Literal["ready", "switching", "degraded"]
+
+
+class InferenceCapability(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.:-]+$")
+    backend_id: str
+    model_id: str
+    target: InferenceTarget
+    device: str
+    compatible: bool
+    available: bool
+    unavailable_reason: str | None = None
+    active: bool = False
+
+    @model_validator(mode="after")
+    def availability_is_explained(self) -> "InferenceCapability":
+        if self.available and (not self.compatible or self.unavailable_reason is not None):
+            raise ValueError(
+                "available capability must be compatible and have no unavailable reason"
+            )
+        if not self.available and not self.unavailable_reason:
+            raise ValueError("unavailable capability must include a reason")
+        return self
+
+
+class InferenceSelection(BaseModel):
+    capability_id: str
+    backend_id: str
+    model_id: str
+    target: InferenceTarget
+    device: str
+
+
+class InferenceCapabilitiesResponse(BaseModel):
+    active: InferenceSelection
+    transition_state: TransitionState
+    transition_error: str | None = None
+    runtime_only: bool = True
+    capabilities: list[InferenceCapability]
+
+
+class InferenceSelectionRequest(BaseModel):
+    capability_id: str = Field(min_length=1, max_length=160, pattern=r"^[a-z0-9][a-z0-9_.:-]+$")

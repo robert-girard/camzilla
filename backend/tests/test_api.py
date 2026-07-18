@@ -33,6 +33,40 @@ def test_fake_pipeline_delivers_versioned_detection_over_websocket() -> None:
     assert message["version"] == "v1"
     assert message["sequence"] >= 0
     assert message["detections"][0]["class_name"] == "person"
+    assert message["target"] == "cpu"
+    assert message["device"] == "synthetic"
+
+
+def test_inference_capabilities_are_typed_and_paths_are_redacted() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/inference")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active"]["capability_id"] == "fake:fake-person-v1:cpu"
+    assert payload["runtime_only"] is True
+    assert {item["target"] for item in payload["capabilities"]} == {
+        "cpu",
+        "gpu",
+        "npu",
+        "tpu",
+    }
+    assert "/models" not in response.text
+    assert ".pt" not in response.text
+
+
+def test_inference_selection_rejects_unknown_and_unavailable_ids() -> None:
+    with TestClient(app) as client:
+        missing = client.put(
+            "/api/v1/inference/selection", json={"capability_id": "fake:missing:cpu"}
+        )
+        unavailable = client.put(
+            "/api/v1/inference/selection",
+            json={"capability_id": "rknn:unconfigured:npu"},
+        )
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "inference capability not found"}
+    assert unavailable.status_code == 409
+    assert unavailable.json() == {"detail": "inference capability is unavailable"}
 
 
 def test_whep_proxy_uses_internal_bridge_and_returns_only_sdp(monkeypatch) -> None:

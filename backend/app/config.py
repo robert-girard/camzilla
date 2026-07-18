@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,8 @@ class Settings(BaseSettings):
     inference_device: str = "auto"
     model_id: str = "yolov8n"
     model_path: str | None = None
+    model_directory: str = "/models"
+    model_manifest_path: str | None = None
     inference_fps: float = Field(default=5.0, gt=0, le=60)
     confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     allowed_classes: str = "person"
@@ -51,6 +54,22 @@ class Settings(BaseSettings):
     @property
     def resolved_model_path(self) -> str:
         return self.model_path or f"/models/{self.model_id}.pt"
+
+    @property
+    def resolved_model_directory(self) -> Path:
+        configured = Path(self.model_directory)
+        if configured.exists():
+            return configured
+        return Path(__file__).resolve().parents[2] / "models"
+
+    @property
+    def resolved_model_manifest_path(self) -> Path:
+        if self.model_manifest_path:
+            return Path(self.model_manifest_path)
+        configured = self.resolved_model_directory / "manifest.yaml"
+        if configured.exists():
+            return configured
+        return Path(__file__).resolve().parents[2] / "models" / "manifest.yaml"
 
     @property
     def class_filter(self) -> frozenset[str]:

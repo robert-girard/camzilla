@@ -99,6 +99,7 @@ class InferencePipeline:
         self._consumer: asyncio.Task[None] | None = None
         self._producer: asyncio.Task[None] | None = None
         self.source_error: str | None = None
+        self._accepting_frames = True
 
     @property
     def dropped_frames(self) -> int:
@@ -111,12 +112,23 @@ class InferencePipeline:
     async def _sample(self, source: AsyncIterator[Frame]) -> None:
         try:
             async for frame in source:
-                self.queue.put_latest(frame)
+                if self._accepting_frames:
+                    self.queue.put_latest(frame)
         except asyncio.CancelledError:
             raise
         except Exception as error:
             # Deliberately report only adapter state, never its source URL.
             self.source_error = type(error).__name__
+
+    def pause(self) -> None:
+        self._accepting_frames = False
+        self.queue.reset()
+
+    def resume(self) -> None:
+        self._accepting_frames = True
+
+    def reset(self) -> None:
+        self.queue.reset()
 
     async def close(self) -> None:
         for task in (self._producer, self._consumer):

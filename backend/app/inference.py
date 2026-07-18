@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol
 
-from .contracts import Detection, DetectionMessage, NormalizedBox
+from .contracts import Detection, DetectionMessage, InferenceTarget, NormalizedBox
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,7 @@ class BackendHealth:
     model_id: str
     ready: bool
     device: str
+    target: InferenceTarget
     fallback_reason: str | None = None
 
 
@@ -49,8 +50,15 @@ class FakeInferenceBackend:
 
     backend_id = "fake"
 
-    def __init__(self, model_id: str = "fake-person-v1") -> None:
+    def __init__(
+        self,
+        model_id: str = "fake-person-v1",
+        device: str = "synthetic",
+        target: InferenceTarget = "cpu",
+    ) -> None:
         self.model_id = model_id
+        self.device = device
+        self.target = target
         self._loaded = False
 
     async def load(self) -> None:
@@ -70,7 +78,7 @@ class FakeInferenceBackend:
         ]
 
     async def health(self) -> BackendHealth:
-        return BackendHealth(self.backend_id, self.model_id, self._loaded, "synthetic")
+        return BackendHealth(self.backend_id, self.model_id, self._loaded, self.device, self.target)
 
     async def close(self) -> None:
         self._loaded = False
@@ -147,6 +155,7 @@ class UltralyticsBackend:
             self.model_id,
             self._model is not None,
             self.selected_device,
+            "gpu" if self.selected_device == "cuda" else "cpu",
             self.fallback_reason,
         )
 
@@ -173,6 +182,7 @@ class DetectionWorker:
         self.failed_frames = 0
         self.last_inference_ms: float | None = None
         self._started_at = perf_counter()
+        self._process_lock = asyncio.Lock()
 
     @property
     def inference_fps(self) -> float:
@@ -180,33 +190,48 @@ class DetectionWorker:
         return self.processed_frames / elapsed if elapsed > 0 else 0
 
     async def process(self, frame: Frame) -> DetectionMessage:
-        started = perf_counter()
-        try:
-            detections = await self.backend.detect(frame)
-            filtered = [
-                item
-                for item in detections
-                if item.class_name in self.allowed_classes
-                and item.confidence >= self.confidence_threshold
-            ]
-            health = await self.backend.health()
-            self.processed_frames += 1
-            message = DetectionMessage(
-                sequence=self.sequence,
-                capture_timestamp=frame.capture_timestamp,
-                result_timestamp=datetime.now(UTC),
-                source_width=frame.width,
-                source_height=frame.height,
-                backend_id=health.backend_id,
-                model_id=health.model_id,
-                inference_ms=(perf_counter() - started) * 1000,
-                inference_fps=self.inference_fps,
-                detections=filtered,
-            )
-            self.sequence += 1
-            self.last_inference_ms = message.inference_ms
-            await self.publish(message)
-            return message
-        except Exception:
-            self.failed_frames += 1
-            raise
+        async with self._process_lock:
+            started = perf_counter()
+            try:
+                detections = await self.backend.detect(frame)
+                filtered = [
+                    item
+                    for item in detections
+                    if item.class_name in self.allowed_classes
+                    and item.confidence >= self.confidence_threshold
+                ]
+                health = await self.backend.health()
+                self.processed_frames += 1
+                message = DetectionMessage(
+                    sequence=self.sequence,
+                    capture_timestamp=frame.capture_timestamp,
+                    result_timestamp=datetime.now(UTC),
+                    source_width=frame.width,
+                    source_height=frame.height,
+                    backend_id=health.backend_id,
+                    model_id=health.model_id,
+                    target=health.target,
+                    device=health.device,
+                    inference_ms=(perf_counter() - started) * 1000,
+                    inference_fps=self.inference_fps,
+                    detections=filtered,
+                )
+                self.sequence += 1
+                self.last_inference_ms = message.inference_ms
+                await self.publish(message)
+                return message
+            except Exception:
+                self.failed_frames += 1
+                raise
+
+    async def replace_backend(self, backend: InferenceBackend) -> InferenceBackend:
+        """Atomically replace the backend after its caller has loaded and warmed it."""
+        async with self._process_lock:
+            previous = self.backend
+            self.backend = backend
+            self.sequence = 0
+            self.processed_frames = 0
+            self.failed_frames = 0
+            self.last_inference_ms = None
+            self._started_at = perf_counter()
+            return previous
