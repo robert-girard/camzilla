@@ -1,6 +1,6 @@
 # Camzilla Implementation Plan
 
-Status: Phase 3b complete locally; remote GitHub Actions confirmation and the attended Phase 2 PTZ/Discord checks remain pending
+Status: Phase 3b complete; completion-audit commits await push/remote CI, and the attended Phase 2 PTZ/Discord checks remain deferred
 Last updated: 2026-07-18
 Primary product source: [PRD](PRD-home-security-ai-alerts.md)
 
@@ -14,7 +14,7 @@ This is the executable roadmap and status tracker. Consult the [PRD](PRD-home-se
 - Update task state in the same change that produces or verifies the work.
 - A phase is complete only when all required tasks and exit criteria are complete. Tasks explicitly marked optional do not block completion.
 - Add discoveries beneath the phase they affect. Put cross-cutting decisions in the decision log and meaningful design changes in ADRs.
-- Phase 1 is complete. Phase 1b is the next intended `/goal`; do not pull PTZ, alerts, recording, persistence, or authentication into it.
+- Implementation through Phase 3b is complete; the attended Phase 2 PTZ/Discord checks remain explicitly deferred, and Phase 4 is the next implementation phase.
 - Mark work `[~]` when it begins and `[x]` only after implementation and validation. Use `[!]` with an unblock condition for genuine blockers.
 - Split partially completed compound tasks instead of marking them complete. Preserve completed tasks and commit status updates with their implementation/tests.
 - Update `Last updated` whenever task state, phase scope, decisions, or exit criteria materially change.
@@ -246,13 +246,14 @@ No RKNN conversion/runtime implementation, TPU adapter, PTZ, alerts, persistence
 - [x] CPU, GPU, NPU, and TPU are represented consistently, with unsupported combinations disabled and explained rather than accepted and silently downgraded.
 - [x] A failed or racing switch cannot leave two active workers, leak a loaded runtime, expose a secret/path, or replace the last healthy backend.
 - [x] Video remains available during a switch, stale detections are cleared, and metadata/diagnostics recover with the newly confirmed identity.
-- [~] Backend, frontend, integration, Playwright, build, and security checks pass in hardware-independent CI; accelerator-specific checks have documented opt-in results and skip behavior. Local CI equivalents pass; GitHub Actions confirmation is pending.
+- [x] Backend, frontend, integration, Playwright, build, and security checks pass in hardware-independent CI; accelerator-specific checks have documented opt-in results and skip behavior.
 
 ### Phase 1b validation evidence
 
 - 2026-07-17: The running no-camera Ultralytics stack reported all six checksum-verified managed weights as CPU-available and switched transactionally through `yolov8n`, `yolov8s`, `yolov8m`, `yolo11n`, `yolo11s`, and `yolo11m`; each response and health check confirmed CPU identity and ready transition state. After the final switch, synthetic inference resumed near 4.9 FPS with 61 processed frames and zero failures. CUDA was unavailable and all GPU combinations remained disabled with a redacted reason; NPU and TPU placeholders were disabled with their planned-runtime explanations.
 - 2026-07-17: Real Chromium against the running API displayed all target categories and six CPU weights, switched explicitly from YOLO11m to YOLOv8n, cleared the old result, and recovered diagnostics/metadata with the confirmed CPU identity. Deterministic browser coverage passed eight flows, including switching state, failed warm-up rollback, unavailable hardware, stale expiry, metadata recovery, fullscreen, and video fallback. No camera media or browser artifact was retained.
 - 2026-07-17: Local CI equivalents passed with 44 backend tests plus 8 expected opt-in skips, backend format/lint/type checks, 3 frontend unit tests, frontend lint/type/build, 8 Playwright flows, security scanning, Compose configuration, production image builds, and a clean no-camera production-stack readiness smoke.
+- 2026-07-18: GitHub Actions [CI run #5](https://github.com/robert-girard/camzilla/actions/runs/29630307822) passed on Phase 3b commit `db468ee`, including backend, frontend, migration/schema, Playwright, security/Compose, image-build, and clean no-camera startup jobs. The later completion-audit commits have equivalent local evidence but have not been pushed.
 
 ## Phase 2 — Complete Tripwire locally on x86 (pre-auth)
 
