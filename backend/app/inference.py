@@ -198,9 +198,11 @@ class DetectionWorker:
         confidence_threshold: float,
         publish: Callable[[DetectionMessage], Awaitable[None]],
         observe: Callable[[Frame, DetectionMessage], None] | None = None,
+        camera_id: str = "front-door",
     ) -> None:
         self.backend = backend
-        self.allowed_classes = allowed_classes
+        self.default_camera_id = camera_id
+        self.allowed_classes_by_camera: dict[str, frozenset[str]] = {camera_id: allowed_classes}
         self.confidence_threshold = confidence_threshold
         self.publish = publish
         self.observe = observe
@@ -208,7 +210,7 @@ class DetectionWorker:
         self.processed_frames = 0
         self.failed_frames = 0
         self.observer_failures = 0
-        self.published_detections: dict[str, int] = {}
+        self.published_detections_by_camera: dict[str, dict[str, int]] = {}
         self.last_inference_ms: float | None = None
         self._started_at = perf_counter()
         self._process_lock = asyncio.Lock()
@@ -218,24 +220,51 @@ class DetectionWorker:
         elapsed = perf_counter() - self._started_at
         return self.processed_frames / elapsed if elapsed > 0 else 0
 
-    async def process(self, frame: Frame) -> DetectionMessage:
+    @property
+    def allowed_classes(self) -> frozenset[str]:
+        return self.allowed_classes_by_camera[self.default_camera_id]
+
+    @allowed_classes.setter
+    def allowed_classes(self, category_ids: frozenset[str]) -> None:
+        self.set_allowed_classes(self.default_camera_id, category_ids)
+
+    @property
+    def published_detections(self) -> dict[str, int]:
+        totals: dict[str, int] = {}
+        for counts in self.published_detections_by_camera.values():
+            for category_id, count in counts.items():
+                totals[category_id] = totals.get(category_id, 0) + count
+        return totals
+
+    def set_allowed_classes(self, camera_id: str, category_ids: frozenset[str]) -> None:
+        if not camera_id:
+            raise ValueError("camera identifier is required")
+        self.allowed_classes_by_camera[camera_id] = category_ids
+
+    async def process(self, frame: Frame, camera_id: str | None = None) -> DetectionMessage:
         async with self._process_lock:
+            selected_camera_id = camera_id or self.default_camera_id
+            allowed_classes = self.allowed_classes_by_camera.get(selected_camera_id, frozenset())
             started = perf_counter()
             try:
                 detections = await self.backend.detect(frame)
                 filtered = [
                     item
                     for item in detections
-                    if item.semantic_id in self.allowed_classes
+                    if item.semantic_id in allowed_classes
                     and item.confidence >= self.confidence_threshold
                 ]
                 health = await self.backend.health()
+                camera_counts = self.published_detections_by_camera.setdefault(
+                    selected_camera_id, {}
+                )
                 for detection in filtered:
-                    self.published_detections[detection.semantic_id] = (
-                        self.published_detections.get(detection.semantic_id, 0) + 1
+                    camera_counts[detection.semantic_id] = (
+                        camera_counts.get(detection.semantic_id, 0) + 1
                     )
                 self.processed_frames += 1
                 message = DetectionMessage(
+                    camera_id=selected_camera_id,
                     sequence=self.sequence,
                     capture_timestamp=frame.capture_timestamp,
                     result_timestamp=datetime.now(UTC),
@@ -271,7 +300,7 @@ class DetectionWorker:
             self.processed_frames = 0
             self.failed_frames = 0
             self.observer_failures = 0
-            self.published_detections = {}
+            self.published_detections_by_camera = {}
             self.last_inference_ms = None
             self._started_at = perf_counter()
             return previous

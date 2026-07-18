@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.alerts import (
     AlertEngine,
+    AlertManager,
     DiscordNotifier,
     DryRunNotifier,
     NotifierDeliveryError,
@@ -32,6 +33,7 @@ from app.inference import Frame
 def detection_message(sequence: int = 1, confidence: float = 0.91) -> DetectionMessage:
     now = datetime.now(UTC)
     return DetectionMessage(
+        camera_id="front-door",
         sequence=sequence,
         capture_timestamp=now,
         result_timestamp=now,
@@ -251,6 +253,64 @@ def test_alert_rule_isolates_categories_by_semantic_id() -> None:
     candidate = engine.queue.get_nowait()
 
     assert candidate.event.matched_classes == {"coco:car"}
+
+
+def test_alert_rule_ignores_detections_from_another_camera() -> None:
+    engine = AlertEngine(
+        AlertRule(id="person-detected", camera_name="front-door"),
+        DryRunNotifier(),
+        requested_notifier="dry-run",
+        external_delivery_configured=False,
+        configuration_reason=None,
+    )
+    side_door_message = detection_message().model_copy(update={"camera_id": "side-door"})
+
+    engine.observe(Frame(640, 480, datetime.now(UTC)), side_door_message)
+
+    assert engine.queue.qsize() == 0
+
+
+def test_alert_manager_routes_each_camera_to_its_own_rules() -> None:
+    def engine(camera_id: str, rule_id: str) -> AlertEngine:
+        return AlertEngine(
+            AlertRule(id=rule_id, camera_name=camera_id),
+            DryRunNotifier(),
+            requested_notifier="dry-run",
+            external_delivery_configured=False,
+            configuration_reason=None,
+        )
+
+    front = engine("front-door", "front-person")
+    side = engine("side-door", "side-person")
+    manager = AlertManager({"front-person": front, "side-person": side})
+
+    manager.observe(
+        Frame(640, 480, datetime.now(UTC)),
+        detection_message().model_copy(update={"camera_id": "side-door"}),
+    )
+
+    assert front.queue.qsize() == 0
+    assert side.queue.qsize() == 1
+
+
+def test_alert_manager_reports_stream_state_once_per_camera() -> None:
+    def engine(rule_id: str) -> AlertEngine:
+        return AlertEngine(
+            AlertRule(id=rule_id, camera_name="front-door"),
+            DryRunNotifier(),
+            requested_notifier="dry-run",
+            external_delivery_configured=False,
+            configuration_reason=None,
+        )
+
+    first = engine("first")
+    second = engine("second")
+    manager = AlertManager({"first": first, "second": second})
+
+    manager.observe_stream_state("front-door", "degraded")
+
+    assert first.stream_state == second.stream_state == "degraded"
+    assert first.queue.qsize() + second.queue.qsize() == 1
 
 
 def test_attachment_contract_rejects_payloads_over_discord_limit() -> None:

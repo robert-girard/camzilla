@@ -131,6 +131,39 @@ async def test_manual_recording_is_singleton_and_stops_through_same_encoder(tmp_
     assert completed == ["manual-one"]
 
 
+@pytest.mark.asyncio
+async def test_clip_recorder_does_not_mix_camera_buffers(tmp_path) -> None:
+    saved_frames = []
+
+    def save(_camera, _event_id, frames, _fps):
+        saved_frames.extend(item.image.value for item in frames)
+        return StoredMedia("front-door/event.mp4", ())
+
+    async def complete(_event_id, _stored):
+        return None
+
+    async def failed(_event_id):
+        raise AssertionError("encoding should not fail")
+
+    recorder = ClipRecorder(
+        MediaStore(tmp_path, quota_bytes=100),
+        fps=1,
+        duration_seconds=3,
+        pre_roll_seconds=1,
+        on_complete=complete,
+        on_failed=failed,
+        save_clip=save,
+    )
+    recorder.observe(frame(0), "front-door")
+    assert recorder.trigger("event", "front-door")
+    recorder.observe(frame(1), "side-door")
+    recorder.observe(frame(2), "front-door")
+    if recorder.tasks:
+        await asyncio.gather(*recorder.tasks)
+
+    assert saved_frames == [0, 2]
+
+
 def test_production_opencv_encoder_writes_a_playable_container_when_available(tmp_path) -> None:
     pytest.importorskip("cv2")
     numpy = pytest.importorskip("numpy")

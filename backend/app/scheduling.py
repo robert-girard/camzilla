@@ -49,3 +49,12 @@ class FairFrameScheduler:
     @property
     def pending_cameras(self) -> int:
         return len(self._latest)
+
+    @property
+    def dropped_total(self) -> int:
+        return sum(self.dropped.values())
+
+    def reset(self) -> None:
+        self._latest.clear()
+        self._ready.clear()
+        self._ready_set.clear()

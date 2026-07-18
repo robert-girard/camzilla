@@ -31,8 +31,8 @@ async def test_pipeline_drops_superseded_frames_when_inference_is_slow() -> None
     await pipeline.start(source())
     await asyncio.sleep(0.06)
     await pipeline.close()
-    assert pipeline.queue.dropped >= 3
-    assert pipeline.dropped_frames == pipeline.queue.dropped + 2
+    assert pipeline.scheduler.dropped_total >= 3
+    assert pipeline.dropped_frames == pipeline.scheduler.dropped_total + 2
     assert worker.processed_frames < 5
     assert messages
 
@@ -132,3 +132,49 @@ async def test_inference_failure_does_not_terminate_pipeline_consumer() -> None:
     assert pipeline._consumer is not None and not pipeline._consumer.done()
     assert len(published) == 1
     await pipeline.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_scheduler_isolates_camera_category_allowlists() -> None:
+    messages = []
+
+    async def publish(message):
+        messages.append(message)
+
+    backend = FakeInferenceBackend(model_id="fake-multi-v1")
+    await backend.load()
+    worker = DetectionWorker(
+        backend,
+        frozenset({"coco:person"}),
+        0.5,
+        publish,
+        camera_id="front-door",
+    )
+    worker.set_allowed_classes("side-door", frozenset({"coco:car"}))
+    pipeline = InferencePipeline(worker, camera_id="front-door")
+
+    async def front_source():
+        for _ in range(8):
+            yield Frame(640, 480, datetime.now(UTC))
+        await asyncio.Event().wait()
+
+    async def side_source():
+        yield Frame(640, 480, datetime.now(UTC))
+        await asyncio.Event().wait()
+
+    await pipeline.start(front_source(), "front-door")
+    await pipeline.add_source("side-door", side_source())
+    for _ in range(100):
+        if {message.camera_id for message in messages} == {"front-door", "side-door"}:
+            break
+        await asyncio.sleep(0.001)
+    await pipeline.close()
+
+    by_camera = {message.camera_id: message for message in messages}
+    assert [item.semantic_id for item in by_camera["front-door"].detections] == ["coco:person"]
+    assert [item.semantic_id for item in by_camera["side-door"].detections] == ["coco:car"]
+    assert worker.published_detections_by_camera == {
+        "front-door": {"coco:person": 1},
+        "side-door": {"coco:car": 1},
+    }
+    assert pipeline.scheduler.dropped.get("front-door", 0) > 0

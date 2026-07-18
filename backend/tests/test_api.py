@@ -36,7 +36,7 @@ def test_fake_pipeline_delivers_versioned_detection_over_websocket() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/api/v1/detections") as websocket:
             message = websocket.receive_json()
-    assert message["version"] == "v1"
+    assert message["version"] == "v2"
     assert message["sequence"] >= 0
     assert message["detections"][0]["class_name"] == "person"
     assert message["detections"][0]["semantic_id"] == "coco:person"
@@ -304,6 +304,57 @@ def test_backup_export_validation_and_optimistic_restore_are_secret_free() -> No
     assert restored.status_code == 200
     assert restored.json()["alert_rules"][0]["confidence_threshold"] == 0.77
     assert conflict.status_code == 409
+
+
+def test_restore_activates_and_updates_every_persisted_alert_rule() -> None:
+    with TestClient(app) as client:
+        document = client.get("/api/v1/backup").json()
+        document["cameras"].append(
+            {
+                "id": "side-door",
+                "name": "Side door",
+                "enabled": True,
+                "allowed_categories": ["coco:person"],
+                "catalog_revision": "coco-person-v1",
+            }
+        )
+        document["alert_rules"].append(
+            {
+                "id": "side-person",
+                "camera_id": "side-door",
+                "enabled": True,
+                "target_categories": ["coco:person"],
+                "confidence_threshold": 0.65,
+                "debounce_seconds": 120,
+            }
+        )
+        version = client.get("/api/v1/config").json()["version"]
+        restored = client.put(
+            "/api/v1/backup",
+            json={"expected_config_version": version, "document": document},
+        )
+        statuses = client.get("/api/v1/alerts/statuses")
+        changed = client.put(
+            "/api/v1/alert-rules/side-person",
+            json={
+                "expected_config_version": restored.json()["version"],
+                "confidence_threshold": 0.7,
+                "debounce_seconds": 180,
+                "target_categories": ["coco:person"],
+            },
+        )
+        updated_statuses = client.get("/api/v1/alerts/statuses")
+
+    assert restored.status_code == 200
+    assert {(item["rule"]["id"], item["rule"]["camera_name"]) for item in statuses.json()} == {
+        ("person-detected", "front-door"),
+        ("side-person", "side-door"),
+    }
+    assert changed.status_code == 200
+    side_status = next(
+        item for item in updated_statuses.json() if item["rule"]["id"] == "side-person"
+    )
+    assert side_status["rule"]["debounce_seconds"] == 180
 
 
 def test_rule_update_rejects_invalid_zone_schedule_and_disabled_category() -> None:

@@ -34,7 +34,7 @@ class Notifier(Protocol):
 
 
 EventSink = Callable[[AlertPayload], Coroutine[Any, Any, None]]
-FrameObserver = Callable[[Frame], None]
+FrameObserver = Callable[[str, Frame], None]
 
 
 class NotifierDeliveryError(Exception):
@@ -243,9 +243,11 @@ class AlertEngine:
         self._delivery_task = asyncio.create_task(self._deliver())
 
     def observe(self, frame: Frame, message: DetectionMessage) -> None:
+        if message.camera_id != self.rule.camera_name:
+            return
         if self.frame_observer:
             try:
-                self.frame_observer(frame)
+                self.frame_observer(message.camera_id, frame)
             except Exception:
                 pass
         if not self.rule.enabled or message.detections == [] or not self._schedule_active():
@@ -320,12 +322,12 @@ class AlertEngine:
             previous = point
         return inside
 
-    def observe_stream_state(self, state: str) -> None:
+    def observe_stream_state(self, state: str, *, emit_events: bool = True) -> None:
         if state not in {"connecting", "ready", "degraded"}:
             return
         previous = self.stream_state
         self.stream_state = cast(Literal["connecting", "ready", "degraded"], state)
-        if not self.stream_down_alerts_enabled:
+        if not self.stream_down_alerts_enabled or not emit_events:
             return
         if state == "degraded":
             now = self.clock()
@@ -433,6 +435,61 @@ class AlertEngine:
                 await self._delivery_task
 
 
+class AlertManager:
+    """Route camera results to every configured rule without cross-camera leakage."""
+
+    def __init__(self, engines: dict[str, AlertEngine]) -> None:
+        if not engines:
+            raise ValueError("at least one alert engine is required")
+        self.engines = engines
+
+    @property
+    def primary(self) -> AlertEngine:
+        return self.engines.get("person-detected", next(iter(self.engines.values())))
+
+    async def start(self) -> None:
+        for engine in self.engines.values():
+            await engine.start()
+
+    def observe(self, frame: Frame, message: DetectionMessage) -> None:
+        for engine in self.engines.values():
+            engine.observe(frame, message)
+
+    def observe_stream_state(self, camera_id: str, state: str) -> None:
+        event_owner_selected = False
+        for rule_id in sorted(self.engines):
+            engine = self.engines[rule_id]
+            if engine.rule.camera_name == camera_id:
+                engine.observe_stream_state(state, emit_events=not event_owner_selected)
+                event_owner_selected = True
+
+    def update_rule(self, rule: AlertRule) -> None:
+        engine = self.engines.get(rule.id)
+        if engine is None:
+            raise KeyError(rule.id)
+        engine.rule = rule
+
+    async def replace(self, engines: dict[str, AlertEngine]) -> None:
+        if not engines:
+            raise ValueError("at least one alert engine is required")
+        for engine in engines.values():
+            await engine.start()
+        previous = self.engines
+        self.engines = engines
+        for engine in previous.values():
+            await engine.close()
+
+    def status(self) -> AlertRuntimeStatus:
+        return self.primary.status()
+
+    def statuses(self) -> list[AlertRuntimeStatus]:
+        return [self.engines[rule_id].status() for rule_id in sorted(self.engines)]
+
+    async def close(self) -> None:
+        for engine in self.engines.values():
+            await engine.close()
+
+
 def build_alert_engine(
     settings: Settings,
     event_sink: EventSink | None = None,
@@ -441,7 +498,7 @@ def build_alert_engine(
     rule = AlertRule(
         id="person-detected",
         camera_name=settings.camera_name,
-        target_classes=settings.alert_class_filter or frozenset({"person"}),
+        target_classes=settings.alert_class_filter or frozenset({"coco:person"}),
         confidence_threshold=settings.alert_confidence_threshold,
         debounce_seconds=settings.alert_debounce_seconds,
         enabled=settings.alerts_enabled,

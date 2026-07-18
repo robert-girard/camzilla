@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .inference import DetectionWorker, Frame
-from .queueing import LatestItemQueue
+from .scheduling import FairFrameScheduler
 
 
 @dataclass(frozen=True)
@@ -156,84 +156,143 @@ class InferencePipeline:
         worker: DetectionWorker,
         source_dropped_frames: Callable[[], int] | None = None,
         source_status: Callable[[], SourceStatus] | None = None,
+        camera_id: str | None = None,
     ) -> None:
         self.worker = worker
-        self.queue: LatestItemQueue[Frame] = LatestItemQueue()
-        self.source_dropped_frames = source_dropped_frames or (lambda: 0)
-        self.source_status_provider = source_status
+        self.camera_id = camera_id or worker.default_camera_id
+        self.scheduler = FairFrameScheduler()
+        self.source_dropped_providers: dict[str, Callable[[], int]] = {
+            self.camera_id: source_dropped_frames or (lambda: 0)
+        }
+        self.source_status_providers: dict[str, Callable[[], SourceStatus]] = {}
+        if source_status:
+            self.source_status_providers[self.camera_id] = source_status
         self._consumer: asyncio.Task[None] | None = None
         self._producer: asyncio.Task[None] | None = None
-        self._source_error: str | None = None
+        self._producers: dict[str, asyncio.Task[None]] = {}
+        self._source_errors: dict[str, str | None] = {}
         self.consumer_error: str | None = None
         self._accepting_frames = True
 
     @property
     def dropped_frames(self) -> int:
-        return self.source_dropped_frames() + self.queue.dropped
+        return self.scheduler.dropped_total + sum(
+            provider() for provider in self.source_dropped_providers.values()
+        )
 
     @property
     def source_error(self) -> str | None:
-        if self.source_status_provider:
-            return self.source_status_provider().last_error
-        return self._source_error
+        provider = self.source_status_providers.get(self.camera_id)
+        if provider:
+            return provider().last_error
+        return self._source_errors.get(self.camera_id)
 
     @source_error.setter
     def source_error(self, value: str | None) -> None:
-        self._source_error = value
+        self._source_errors[self.camera_id] = value
 
     @property
     def source_state(self) -> str:
-        if self.source_status_provider:
-            return self.source_status_provider().state
-        return "error" if self._source_error else "ready"
+        provider = self.source_status_providers.get(self.camera_id)
+        if provider:
+            return provider().state
+        return "error" if self._source_errors.get(self.camera_id) else "ready"
 
     @property
     def source_reconnects(self) -> int:
-        return self.source_status_provider().reconnects if self.source_status_provider else 0
+        provider = self.source_status_providers.get(self.camera_id)
+        return provider().reconnects if provider else 0
 
-    async def start(self, source: AsyncIterator[Frame]) -> None:
+    @property
+    def camera_metrics(self) -> dict[str, dict[str, object]]:
+        camera_ids = set(self.source_dropped_providers) | set(self._producers)
+        return {
+            camera_id: {
+                "dropped_frames": self.scheduler.dropped.get(camera_id, 0)
+                + self.source_dropped_providers.get(camera_id, lambda: 0)(),
+                "source_state": (
+                    self.source_status_providers[camera_id]().state
+                    if camera_id in self.source_status_providers
+                    else "error"
+                    if self._source_errors.get(camera_id)
+                    else "ready"
+                ),
+                "source_reconnects": (
+                    self.source_status_providers[camera_id]().reconnects
+                    if camera_id in self.source_status_providers
+                    else 0
+                ),
+            }
+            for camera_id in sorted(camera_ids)
+        }
+
+    async def start(self, source: AsyncIterator[Frame], camera_id: str | None = None) -> None:
+        if self._consumer is not None:
+            raise RuntimeError("inference pipeline is already started")
         self._consumer = asyncio.create_task(self._consume())
-        self._producer = asyncio.create_task(self._sample(source))
+        await self.add_source(camera_id or self.camera_id, source)
+
+    async def add_source(
+        self,
+        camera_id: str,
+        source: AsyncIterator[Frame],
+        *,
+        source_dropped_frames: Callable[[], int] | None = None,
+        source_status: Callable[[], SourceStatus] | None = None,
+    ) -> None:
+        if not camera_id:
+            raise ValueError("camera identifier is required")
+        if camera_id in self._producers:
+            raise ValueError("camera source is already registered")
+        if source_dropped_frames:
+            self.source_dropped_providers[camera_id] = source_dropped_frames
+        else:
+            self.source_dropped_providers.setdefault(camera_id, lambda: 0)
+        if source_status:
+            self.source_status_providers[camera_id] = source_status
+        producer = asyncio.create_task(self._sample(camera_id, source))
+        self._producers[camera_id] = producer
+        if camera_id == self.camera_id:
+            self._producer = producer
 
     async def _consume(self) -> None:
         while True:
-            frame = await self.queue.get()
+            scheduled = await self.scheduler.next()
             try:
-                await self.worker.process(frame)
+                await self.worker.process(scheduled.frame, scheduled.camera_id)
                 self.consumer_error = None
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 self.consumer_error = type(error).__name__
-            finally:
-                self.queue.done()
 
-    async def _sample(self, source: AsyncIterator[Frame]) -> None:
+    async def _sample(self, camera_id: str, source: AsyncIterator[Frame]) -> None:
         try:
             async for frame in source:
                 if self._accepting_frames:
-                    self.queue.put_latest(frame)
+                    await self.scheduler.submit(camera_id, frame)
         except asyncio.CancelledError:
             raise
         except Exception as error:
             # Deliberately report only adapter state, never its source URL.
-            self._source_error = type(error).__name__
+            self._source_errors[camera_id] = type(error).__name__
 
     def pause(self) -> None:
         self._accepting_frames = False
-        self.queue.reset()
+        self.scheduler.reset()
 
     def resume(self) -> None:
         self._accepting_frames = True
 
     def reset(self) -> None:
-        self.queue.reset()
+        self.scheduler.reset()
 
     async def close(self) -> None:
-        for task in (self._producer, self._consumer):
-            if task:
-                task.cancel()
-        for task in (self._producer, self._consumer):
-            if task:
-                with suppress(asyncio.CancelledError):
-                    await task
+        tasks = [*self._producers.values()]
+        if self._consumer:
+            tasks.append(self._consumer)
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task

@@ -11,13 +11,14 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from .alerts import AlertEngine, build_alert_engine
+from .alerts import AlertEngine, AlertManager, build_alert_engine
 from .backup import build_backup, validate_backup
 from .catalog import catalog_category_ids, catalog_for
 from .config import Settings, get_settings
 from .contracts import (
     AlertPayload,
     AlertRule,
+    AlertRuleConfiguration,
     AlertRuleUpdate,
     AlertRuntimeStatus,
     BackupDocument,
@@ -28,6 +29,7 @@ from .contracts import (
     CategoryCompatibilityResponse,
     CategorySelectionResponse,
     CategorySelectionUpdate,
+    DetectionMessage,
     EventPage,
     GlobalConfiguration,
     InferenceCapabilitiesResponse,
@@ -39,7 +41,13 @@ from .contracts import (
     RecordingResponse,
     StreamDescriptor,
 )
-from .inference import DetectionWorker, FakeInferenceBackend, InferenceBackend, UltralyticsBackend
+from .inference import (
+    DetectionWorker,
+    FakeInferenceBackend,
+    Frame,
+    InferenceBackend,
+    UltralyticsBackend,
+)
 from .media import ClipRecorder, MediaStorageError, MediaStore, StoredMedia
 from .model_registry import ModelRegistry
 from .persistence import ConfigurationConflictError, Database, Repository
@@ -202,42 +210,66 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     hub = DetectionHub()
     app.state.hub = hub
-    alert_engine = build_alert_engine(
-        settings,
-        event_sink=persist_event,
-        frame_observer=clip_recorder.observe if clip_recorder else None,
-    )
     persisted_configuration = await asyncio.to_thread(repository.configuration)
     primary_camera = next(
         item for item in persisted_configuration.cameras if item.id == settings.camera_name
     )
-    persisted_rule = next(
-        item for item in persisted_configuration.alert_rules if item.id == "person-detected"
-    )
-    alert_engine.rule = AlertRule(
-        id=persisted_rule.id,
-        camera_name=settings.camera_name,
-        target_classes=frozenset(persisted_rule.target_categories),
-        confidence_threshold=persisted_rule.confidence_threshold,
-        debounce_seconds=persisted_rule.debounce_seconds,
-        enabled=persisted_rule.enabled,
-        schedule_start=persisted_rule.schedule_start,
-        schedule_end=persisted_rule.schedule_end,
-        zone=(
-            [(point.x, point.y) for point in persisted_rule.zone.points]
-            if persisted_rule.zone
-            else None
-        ),
-    )
-    await alert_engine.start()
-    app.state.alert_engine = alert_engine
+
+    def runtime_alert_rule(
+        rule: AlertRuleConfiguration, configuration: GlobalConfiguration
+    ) -> AlertRule:
+        camera = next(item for item in configuration.cameras if item.id == rule.camera_id)
+        return AlertRule(
+            id=rule.id,
+            camera_name=camera.id,
+            target_classes=frozenset(rule.target_categories),
+            confidence_threshold=rule.confidence_threshold,
+            debounce_seconds=rule.debounce_seconds,
+            enabled=rule.enabled,
+            schedule_start=rule.schedule_start,
+            schedule_end=rule.schedule_end,
+            zone=([(point.x, point.y) for point in rule.zone.points] if rule.zone else None),
+        )
+
+    def build_alert_engines(configuration: GlobalConfiguration) -> dict[str, AlertEngine]:
+        engines: dict[str, AlertEngine] = {}
+        for configured_rule in configuration.alert_rules:
+            engine = build_alert_engine(settings, event_sink=persist_event)
+            engine.rule = runtime_alert_rule(configured_rule, configuration)
+            engines[configured_rule.id] = engine
+        if not engines:
+            engine = build_alert_engine(settings, event_sink=persist_event)
+            engine.rule = engine.rule.model_copy(update={"enabled": False})
+            engines[engine.rule.id] = engine
+        return engines
+
+    alert_manager = AlertManager(build_alert_engines(persisted_configuration))
+    await alert_manager.start()
+    app.state.alert_manager = alert_manager
+    app.state.alert_engine = alert_manager.primary
+
+    async def reconfigure_alerts(configuration: GlobalConfiguration) -> None:
+        await alert_manager.replace(build_alert_engines(configuration))
+        app.state.alert_engine = alert_manager.primary
+
+    app.state.reconfigure_alerts = reconfigure_alerts
+
+    def observe_detection(frame: Frame, message: DetectionMessage) -> None:
+        # Fan one decoded camera frame to camera-isolated media and alerts.
+        if clip_recorder:
+            clip_recorder.observe(frame, message.camera_id)
+        alert_manager.observe(frame, message)
+
     app.state.worker = DetectionWorker(
         backend,
         frozenset(primary_camera.allowed_categories),
         settings.confidence_threshold,
         hub.publish,
-        alert_engine.observe,
+        observe_detection,
+        camera_id=settings.camera_name,
     )
+    for camera in persisted_configuration.cameras:
+        app.state.worker.set_allowed_classes(camera.id, frozenset(camera.allowed_categories))
     # The physical-camera URL is only supplied to go2rtc. Inference consumes its
     # local restream; no-camera development/CI remains deterministic.
     if settings.camera_rtsp_url:
@@ -245,21 +277,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.inference_restream_url, settings.inference_fps
         )
         reconnecting_source = ReconnectingFrameSource(
-            restream_source.frames, on_state=alert_engine.observe_stream_state
+            restream_source.frames,
+            on_state=lambda state: alert_manager.observe_stream_state(settings.camera_name, state),
         )
         source = reconnecting_source.frames()
         pipeline = InferencePipeline(
             app.state.worker,
             source_dropped_frames=lambda: restream_source.dropped_frames,
             source_status=lambda: reconnecting_source.status,
+            camera_id=settings.camera_name,
         )
     else:
-        alert_engine.observe_stream_state("ready")
+        alert_manager.observe_stream_state(settings.camera_name, "ready")
         source = SyntheticFrameSource(
             settings.inference_fps, decoded_image=settings.inference_backend == "ultralytics"
         ).frames()
-        pipeline = InferencePipeline(app.state.worker)
-    await pipeline.start(source)
+        pipeline = InferencePipeline(app.state.worker, camera_id=settings.camera_name)
+    await pipeline.start(source, settings.camera_name)
     app.state.pipeline = pipeline
     specs = build_capability_specs(
         registry,
@@ -350,7 +384,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with suppress(asyncio.CancelledError):
             await heartbeat
         await pipeline.close()
-        await alert_engine.close()
+        await alert_manager.close()
         if clip_recorder:
             await clip_recorder.close()
         await app.state.worker.backend.close()
@@ -372,8 +406,9 @@ async def ready() -> dict[str, object]:
     backend_health = await selection.worker.backend.health()
     worker: DetectionWorker = app.state.worker
     pipeline: InferencePipeline = app.state.pipeline
-    alert_engine: AlertEngine = app.state.alert_engine
-    alert_status = alert_engine.status()
+    alert_manager: AlertManager = app.state.alert_manager
+    alert_status = alert_manager.status()
+    alert_statuses = alert_manager.statuses()
     camera_configured = settings.camera_rtsp_url is not None
     source_state = (
         pipeline.source_state if camera_configured or pipeline.source_error else "synthetic"
@@ -385,7 +420,7 @@ async def ready() -> dict[str, object]:
             and source_state in {"ready", "synthetic"}
             and pipeline.consumer_error is None
             and selection.transition_state == "ready"
-            and alert_status.last_error is None
+            and all(status.last_error is None for status in alert_statuses)
             else "degraded"
         ),
         "camera": {
@@ -406,6 +441,7 @@ async def ready() -> dict[str, object]:
         },
         "websocket_clients": app.state.hub.clients,
         "alerts": alert_status.model_dump(mode="json"),
+        "alert_rules": [status.model_dump(mode="json") for status in alert_statuses],
         "media": {
             "enabled": app.state.media_store is not None,
             "failures": app.state.media_failures,
@@ -422,6 +458,8 @@ async def ready() -> dict[str, object]:
             "inference_fps": worker.inference_fps,
             "last_inference_ms": worker.last_inference_ms,
             "published_detections_by_category": worker.published_detections,
+            "published_detections_by_camera": worker.published_detections_by_camera,
+            "cameras": pipeline.camera_metrics,
         },
         "bridge": {"state": source_state},
     }
@@ -429,8 +467,14 @@ async def ready() -> dict[str, object]:
 
 @app.get("/api/v1/alerts/status", response_model=AlertRuntimeStatus)
 async def alert_status() -> AlertRuntimeStatus:
-    alert_engine: AlertEngine = app.state.alert_engine
-    return alert_engine.status()
+    alert_manager: AlertManager = app.state.alert_manager
+    return alert_manager.status()
+
+
+@app.get("/api/v1/alerts/statuses", response_model=list[AlertRuntimeStatus])
+async def alert_statuses() -> list[AlertRuntimeStatus]:
+    alert_manager: AlertManager = app.state.alert_manager
+    return alert_manager.statuses()
 
 
 @app.get("/api/v1/config", response_model=GlobalConfiguration)
@@ -491,9 +535,7 @@ async def update_camera_categories(
             status_code=409,
             detail="category change would invalidate an alert rule; update the rule first",
         ) from error
-    settings = get_settings()
-    if camera_id == settings.camera_name:
-        selection.worker.allowed_classes = frozenset(request.category_ids)
+    selection.worker.set_allowed_classes(camera_id, frozenset(request.category_ids))
     current = await asyncio.to_thread(repository.configuration)
     camera = next(item for item in current.cameras if item.id == camera_id)
     return CategorySelectionResponse(
@@ -523,6 +565,7 @@ async def add_camera(request: CameraCreate) -> GlobalConfiguration:
         raise HTTPException(status_code=409, detail="configuration version conflict") from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail="camera already exists") from error
+    selection.worker.set_allowed_classes(request.id, frozenset({"coco:person"}))
     return await asyncio.to_thread(repository.configuration)
 
 
@@ -578,29 +621,9 @@ async def restore_backup(request: BackupRestoreRequest) -> GlobalConfiguration:
             selection.selection_changed = callback
     app.state.active_catalog_revision = backup_catalog.revision
     restored = await asyncio.to_thread(repository.configuration)
-    settings = get_settings()
-    primary = next((item for item in restored.cameras if item.id == settings.camera_name), None)
-    if primary:
-        selection.worker.allowed_classes = frozenset(primary.allowed_categories)
-    restored_rule = next((item for item in restored.alert_rules if item.enabled), None)
-    if restored_rule:
-        alert_engine: AlertEngine = app.state.alert_engine
-        camera = next(item for item in restored.cameras if item.id == restored_rule.camera_id)
-        alert_engine.rule = AlertRule(
-            id=restored_rule.id,
-            camera_name=camera.name,
-            target_classes=frozenset(restored_rule.target_categories),
-            confidence_threshold=restored_rule.confidence_threshold,
-            debounce_seconds=restored_rule.debounce_seconds,
-            enabled=restored_rule.enabled,
-            schedule_start=restored_rule.schedule_start,
-            schedule_end=restored_rule.schedule_end,
-            zone=(
-                [(point.x, point.y) for point in restored_rule.zone.points]
-                if restored_rule.zone
-                else None
-            ),
-        )
+    for camera in restored.cameras:
+        selection.worker.set_allowed_classes(camera.id, frozenset(camera.allowed_categories))
+    await app.state.reconfigure_alerts(restored)
     return restored
 
 
@@ -631,17 +654,19 @@ async def update_alert_rule(rule_id: str, request: AlertRuleUpdate) -> GlobalCon
         )
     except ConfigurationConflictError as error:
         raise HTTPException(status_code=409, detail="configuration version conflict") from error
-    alert_engine: AlertEngine = app.state.alert_engine
-    alert_engine.rule = AlertRule(
-        id=rule_id,
-        camera_name=camera.name,
-        target_classes=frozenset(request.target_categories),
-        confidence_threshold=request.confidence_threshold,
-        debounce_seconds=request.debounce_seconds,
-        enabled=rule.enabled,
-        schedule_start=request.schedule_start,
-        schedule_end=request.schedule_end,
-        zone=([(point.x, point.y) for point in request.zone.points] if request.zone else None),
+    alert_manager: AlertManager = app.state.alert_manager
+    alert_manager.update_rule(
+        AlertRule(
+            id=rule_id,
+            camera_name=camera.id,
+            target_classes=frozenset(request.target_categories),
+            confidence_threshold=request.confidence_threshold,
+            debounce_seconds=request.debounce_seconds,
+            enabled=rule.enabled,
+            schedule_start=request.schedule_start,
+            schedule_end=request.schedule_end,
+            zone=([(point.x, point.y) for point in request.zone.points] if request.zone else None),
+        )
     )
     return await asyncio.to_thread(repository.configuration)
 
@@ -865,7 +890,14 @@ async def hls_diagnostic(asset: str, request: Request) -> Response:
 @app.websocket("/api/v1/detections")
 async def detections(websocket: WebSocket) -> None:
     hub: DetectionHub = websocket.app.state.hub
-    await hub.connect(websocket)
+    camera_id = websocket.query_params.get("camera_id")
+    if camera_id:
+        repository: Repository = websocket.app.state.repository
+        current = await asyncio.to_thread(repository.configuration)
+        if camera_id not in {camera.id for camera in current.cameras}:
+            await websocket.close(code=1008, reason="camera not found")
+            return
+    await hub.connect(websocket, camera_id)
     try:
         while True:
             await websocket.receive_text()

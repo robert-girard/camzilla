@@ -167,7 +167,9 @@ class ClipRecorder:
         self.on_complete = on_complete
         self.on_failed = on_failed
         self.save_clip = save_clip or store.save_clip_frames
-        self.buffer: deque[Frame] = deque(maxlen=max(1, round(fps * self.pre_roll_seconds)))
+        self.buffer_size = max(1, round(fps * self.pre_roll_seconds))
+        self.buffers: dict[str, deque[Frame]] = {}
+        self._default_buffer_id = "__default__"
         self.sessions: dict[str, ClipSession] = {}
         self.tasks: set[asyncio.Task[None]] = set()
 
@@ -177,14 +179,17 @@ class ClipRecorder:
         copied = image.copy() if image is not None and hasattr(image, "copy") else image
         return Frame(frame.width, frame.height, frame.capture_timestamp, copied)
 
-    def observe(self, frame: Frame) -> None:
+    def observe(self, frame: Frame, camera_id: str | None = None) -> None:
         if frame.image is None:
             return
+        selected_camera_id = camera_id or self._default_buffer_id
         copied = self._copy(frame)
-        self.buffer.append(copied)
+        self.buffers.setdefault(selected_camera_id, deque(maxlen=self.buffer_size)).append(copied)
         completed: list[ClipSession] = []
         timestamp = frame.capture_timestamp.timestamp()
         for session in self.sessions.values():
+            if camera_id is not None and session.camera_id != selected_camera_id:
+                continue
             session.frames.append(copied)
             if timestamp - session.triggered_at >= session.post_roll_seconds:
                 completed.append(session)
@@ -193,22 +198,27 @@ class ClipRecorder:
             self._schedule(session)
 
     def trigger(self, event_id: str, camera_id: str) -> bool:
-        if not self.buffer or event_id in self.sessions:
+        buffer = self.buffers.get(camera_id) or self.buffers.get(self._default_buffer_id)
+        if not buffer or event_id in self.sessions:
             return False
-        triggered_at = self.buffer[-1].capture_timestamp.timestamp()
+        triggered_at = buffer[-1].capture_timestamp.timestamp()
         self.sessions[event_id] = ClipSession(
             event_id,
             camera_id,
-            list(self.buffer),
+            list(buffer),
             triggered_at,
             max(0, self.duration_seconds - self.pre_roll_seconds),
         )
         return True
 
     def start_manual(self, event_id: str, camera_id: str) -> None:
-        if any(item.post_roll_seconds == float("inf") for item in self.sessions.values()):
+        if any(
+            item.camera_id == camera_id and item.post_roll_seconds == float("inf")
+            for item in self.sessions.values()
+        ):
             raise MediaStorageError("manual recording is already active")
-        timestamp = self.buffer[-1].capture_timestamp.timestamp() if self.buffer else 0
+        buffer = self.buffers.get(camera_id) or self.buffers.get(self._default_buffer_id)
+        timestamp = buffer[-1].capture_timestamp.timestamp() if buffer else 0
         self.sessions[event_id] = ClipSession(event_id, camera_id, [], timestamp, float("inf"))
 
     def stop_manual(self, event_id: str) -> bool:

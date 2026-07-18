@@ -1,4 +1,4 @@
-from app.contracts import Detection
+from app.contracts import Detection, DetectionMessage
 from app.main import app
 
 
@@ -14,6 +14,7 @@ def test_openapi_keeps_phase_three_contracts_and_excludes_secret_configuration()
         "/api/v1/backup",
         "/api/v1/backup/validate",
         "/api/v1/inference",
+        "/api/v1/alerts/statuses",
         "/api/v1/inference/compatibility/{capability_id}",
         "/api/v1/cameras/{camera_id}/categories",
     }
@@ -25,5 +26,8 @@ def test_openapi_keeps_phase_three_contracts_and_excludes_secret_configuration()
     assert "database_url" not in serialized
     detection = Detection.model_json_schema()["properties"]
     assert {"semantic_id", "native_class_id", "class_name"} <= set(detection)
+    message = DetectionMessage.model_json_schema()["properties"]
+    assert "camera_id" in message
+    assert message["version"]["const"] == "v2"
     backup = schema["components"]["schemas"]["BackupDocument"]["properties"]
     assert backup["schema_version"]["const"] == "2"

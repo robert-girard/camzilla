@@ -28,7 +28,8 @@ class Detection(BaseModel):
 
 
 class DetectionMessage(BaseModel):
-    version: Literal["v1"] = "v1"
+    version: Literal["v2"] = "v2"
+    camera_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]+$")
     sequence: int = Field(ge=0)
     capture_timestamp: datetime
     result_timestamp: datetime
